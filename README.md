@@ -107,7 +107,7 @@ The node only requires standard Python packages:
 The Video Shot Splitter node automatically splits videos into individual shots using advanced scene detection algorithms.
 
 ### Inputs:
-- **file_path** (STRING): Path to the input video file (MP4 or WebP)
+- **video** (STRING): Video file path or connect from other video nodes (VideoDownloader, LoadVideo, etc.)
 - **detector** (CHOICE): Scene detection algorithm ("content" or "adaptive")
 - **threshold** (FLOAT): Detection sensitivity threshold (0.1-50.0, default: 8.0)
 - **min_scene_len** (INT): Minimum scene length in frames (1-300, default: 15)
@@ -125,10 +125,16 @@ The Video Shot Splitter node automatically splits videos into individual shots u
 
 ### Example Usage:
 1. Add the "Video Shot Splitter" node to your ComfyUI workflow
-2. Connect a video file path (from Video Downloader or direct path)
+2. Connect a video input from another node (like Video Downloader) or enter a direct file path
 3. Choose detection algorithm and adjust sensitivity if needed
 4. The node will automatically detect scene changes and split the video
 5. Output paths can be used to process individual shots separately
+
+### Video Input Compatibility:
+- Accepts STRING input (file paths)
+- Compatible with outputs from VideoDownloader node
+- Works with any node that outputs video file paths
+- Automatically extracts file paths from various video object formats
 
 ### Manual Chunking:
 - Set `seconds_per_shot` to a value > 0 to split video at fixed intervals
