@@ -14,7 +14,7 @@ A collection of custom nodes for ComfyUI
 
 # Features
 
-- A list of features
+- **Video Downloader Node**: Download videos from URLs (YouTube, Vimeo, direct links, etc.) and get a preview with local file path output
 
 ## Develop
 
@@ -48,6 +48,40 @@ An example custom node is located in [node.py](src/sprited_nodes/nodes.py). To l
 ## Tests
 
 This repo contains unit tests written in Pytest in the `tests/` directory. It is recommended to unit test your custom node.
+## Video Downloader Node Usage
+
+The Video Downloader node allows you to download videos from direct URLs and provides the local file path.
+
+### Inputs:
+- **url** (STRING): The URL of the video to download (direct video URLs like `https://example.com/video.mp4`)
+- **filename_prefix** (STRING): Prefix for the downloaded filename (default: "ComfyUI")
+
+### Outputs:
+- **file_path** (STRING): Local path to the downloaded video file
+
+### Requirements:
+The node only requires standard Python packages:
+- `requests` for downloading
+
+### Example Usage:
+1. Add the "Video Downloader" node to your ComfyUI workflow
+2. Enter a direct video URL: `https://example.com/path/myvideo.mp4`
+3. Set a filename prefix like "MyProject" (or use default "ComfyUI")
+4. The node will save the file as `MyProject_myvideo.mp4`
+5. The node will download the video as-is and provide the file path
+6. Use the file path output to connect to other video processing nodes
+
+### Performance Notes:
+- Downloads files directly using streaming HTTP requests
+- Preserves original video format and quality
+- Automatically extracts filename from URL and adds prefix
+- Shows download progress for large files
+
+### Notes:
+- Downloads are stored in the system temp directory under `comfyui_video_downloads`
+- Download timeout is set to 30 seconds
+- The node will re-execute when the URL or filename_prefix changes
+
 
 - [build-pipeline.yml](.github/workflows/build-pipeline.yml) will run pytest and linter on any open PRs
 - [validate.yml](.github/workflows/validate.yml) will run [node-diff](https://github.com/Comfy-Org/node-diff) to check for breaking changes

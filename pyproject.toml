@@ -13,7 +13,7 @@ readme = "README.md"
 license = {text = "MIT license"}
 classifiers = []
 dependencies = [
-
+    "requests>=2.25.0",
 ]
 
 
