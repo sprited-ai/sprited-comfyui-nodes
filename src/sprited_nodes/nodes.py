@@ -108,16 +108,19 @@ class Example:
 
 # Import the video downloader
 from .download_video import VideoDownloader
+from .split_shots import VideoShotSplitter
 
 # A dictionary that contains all nodes you want to export with their names
 # NOTE: names should be globally unique
 NODE_CLASS_MAPPINGS = {
     "Example": Example,
-    "VideoDownloader": VideoDownloader
+    "VideoDownloader": VideoDownloader,
+    "VideoShotSplitter": VideoShotSplitter
 }
 
 # A dictionary that contains the friendly/humanly readable titles for the nodes
 NODE_DISPLAY_NAME_MAPPINGS = {
     "Example": "Example Node",
-    "VideoDownloader": "Video Downloader"
+    "VideoDownloader": "Video Downloader",
+    "VideoShotSplitter": "Video Shot Splitter"
 }

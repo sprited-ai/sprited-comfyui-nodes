@@ -8,13 +8,33 @@ A collection of custom nodes for ComfyUI
 ## Quickstart
 
 1. Install [ComfyUI](https://docs.comfy.org/get_started).
-1. Install [ComfyUI-Manager](https://github.com/ltdrdata/ComfyUI-Manager)
-1. Look up this extension in ComfyUI-Manager. If you are installing manually, clone this repository under `ComfyUI/custom_nodes`.
-1. Restart ComfyUI.
+2. Install [ComfyUI-Manager](https://github.com/ltdrdata/ComfyUI-Manager)
+3. Look up this extension in ComfyUI-Manager. If you are installing manually, clone this repository under `ComfyUI/custom_nodes`.
+4. Install dependencies: `pip install -r requirements.txt` or run `./install.sh`
+5. Restart ComfyUI.
+
+## Requirements
+
+### System Dependencies
+- **FFmpeg**: Required for video processing
+  - Ubuntu/Debian: `sudo apt install ffmpeg`
+  - macOS: `brew install ffmpeg`
+  - Windows: Download from [https://ffmpeg.org/download.html](https://ffmpeg.org/download.html)
+
+### Python Dependencies (installed automatically)
+- `requests>=2.25.0`
+- `scenedetect>=0.6.0`
+- `opencv-python>=4.5.0`
+
+### Optional
+- **WebP tools**: For WebP video support
+  - Ubuntu/Debian: `sudo apt install webp`
+  - macOS: `brew install webp`
 
 # Features
 
 - **Video Downloader Node**: Download videos from URLs (YouTube, Vimeo, direct links, etc.) and get a preview with local file path output
+- **Video Shot Splitter Node**: Automatically split videos into individual shots using scene detection algorithms
 
 ## Develop
 
@@ -81,6 +101,45 @@ The node only requires standard Python packages:
 - Downloads are stored in the system temp directory under `comfyui_video_downloads`
 - Download timeout is set to 30 seconds
 - The node will re-execute when the URL or filename_prefix changes
+
+## Video Shot Splitter Node Usage
+
+The Video Shot Splitter node automatically splits videos into individual shots using advanced scene detection algorithms.
+
+### Inputs:
+- **file_path** (STRING): Path to the input video file (MP4 or WebP)
+- **detector** (CHOICE): Scene detection algorithm ("content" or "adaptive")
+- **threshold** (FLOAT): Detection sensitivity threshold (0.1-50.0, default: 8.0)
+- **min_scene_len** (INT): Minimum scene length in frames (1-300, default: 15)
+- **output_format** (CHOICE): Output format for shot files ("mp4" or "webp")
+- **reencode** (CHOICE): Whether to re-encode ("true" or "false", default: "false")
+- **seconds_per_shot** (FLOAT, optional): Manual chunking interval in seconds (0 = auto detection)
+- **output_dir** (STRING, optional): Output directory (empty = auto-generate)
+
+### Outputs:
+- **shot_file_paths** (STRING): Comma-separated list of paths to individual shot video files
+
+### Detection Algorithms:
+- **content**: Fast content-based detection (recommended for most videos)
+- **adaptive**: Adaptive threshold detection (better for variable content)
+
+### Example Usage:
+1. Add the "Video Shot Splitter" node to your ComfyUI workflow
+2. Connect a video file path (from Video Downloader or direct path)
+3. Choose detection algorithm and adjust sensitivity if needed
+4. The node will automatically detect scene changes and split the video
+5. Output paths can be used to process individual shots separately
+
+### Manual Chunking:
+- Set `seconds_per_shot` to a value > 0 to split video at fixed intervals
+- Useful when you want uniform shot lengths instead of scene-based splitting
+- Example: `seconds_per_shot = 5.0` creates 5-second clips
+
+### Performance Notes:
+- Fast copy mode (no re-encoding) for MP4 output when `reencode = false`
+- Lossless re-encoding available for maximum compatibility
+- WebP input files are automatically converted to temporary MP4 for processing
+- Progress is shown in ComfyUI console during processing
 
 
 - [build-pipeline.yml](.github/workflows/build-pipeline.yml) will run pytest and linter on any open PRs
