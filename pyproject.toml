@@ -29,12 +29,12 @@ dev = [
 ]
 
 [project.urls]
-bugs = "https://github.com/kndlt/sprited_nodes/issues"
-homepage = "https://github.com/kndlt/sprited_nodes"
+bugs = "https://github.com/sprited-ai/sprited_nodes/issues"
+homepage = "https://github.com/sprited-ai/sprited_nodes"
 
 
 [tool.comfy]
-PublisherId = "kndlt"
+PublisherId = "sprited-ai"
 DisplayName = "Sprited ComfyUI Nodes"
 Icon = ""
 
