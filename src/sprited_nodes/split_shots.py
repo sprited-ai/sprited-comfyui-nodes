@@ -15,28 +15,10 @@ from typing import List, Tuple
 from inspect import cleandoc
 
 # ---------------------------------------------------------------------------
-# Lightweight video wrapper (replaces the bad import) 🔧
+# ComfyUI video input type
 # ---------------------------------------------------------------------------
-class _VideoClip:
-    """
-    Minimal wrapper so other nodes see something that *looks* like the objects
-    produced by Load Video:
-
-        • .video_path / .filename  →  path on disk
-        • .save_to(dst)            →  copy file to dst
-        • str(obj)                 →  path (fallback)
-
-    Nothing else is needed for downstream nodes like Preview Any or Save Video.
-    """
-    def __init__(self, path: str | Path):
-        self.video_path = str(path)
-        self.filename   = str(path)
-
-    def save_to(self, dst):
-        shutil.copy2(self.video_path, dst)
-
-    def __str__(self):
-        return self.video_path
+from comfy_api.input.video_types import VideoInput
+from comfy_api.input_impl import VideoFromFile
 
 # ── optional deps -----------------------------------------------------------
 try:
@@ -180,7 +162,7 @@ class VideoShotSplitter:
                 subprocess.check_call(encode_cmd(output_format, work_path,
                                                  start.get_timecode(), n,
                                                  dst, reencode=reencode))
-                shot_videos.append(_VideoClip(dst))  # ← wrapper
+                shot_videos.append(VideoFromFile(str(dst)))  # ← proper ComfyUI video type
                 print(f"[VideoShotSplitter] → {dst.name}")
 
             # clean temp stuff
