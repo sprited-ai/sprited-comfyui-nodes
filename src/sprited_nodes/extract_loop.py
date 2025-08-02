@@ -1,11 +1,19 @@
 # ────────────────────────────────────────────────────────────────────────────
 # LoopTrimNode – detect best seamless loop and spit out the trimmed clip
 # ────────────────────────────────────────────────────────────────────────────
-import json, tempfile, math
+import json, tempfile, math, os
+from pathlib import Path
 import imageio.v3 as iio
 import numpy as np
 from PIL import Image
 import imagehash
+
+# ComfyUI video types
+try:
+    from comfy_api.input_impl import VideoFromFile
+except ImportError:
+    # Fallback if ComfyUI API is not available
+    VideoFromFile = str
 
 # ---- hashing helpers (unchanged) ------------------------------------------
 def phash_vec(img):
@@ -152,7 +160,7 @@ class LoopTrimNode:
                 "min_gap":    ("INT", {"default": 10, "min": 2,  "max": 240}),
                 "max_gap":    ("INT", {"default": 120,"min": 10, "max": 600}),
                 "threshold":  ("INT", {"default": 2,  "min": 0,  "max": 64}),
-                "lambda":     ("FLOAT", {"default": 0.5,"min": 0.0, "max": 5.0, "step": 0.1}),
+                "lambda_":    ("FLOAT", {"default": 0.5,"min": 0.0, "max": 5.0, "step": 0.1}),
                 "format":     (["mp4", "gif", "webp"], {"default": "webp"}),
             },
             "optional": {
@@ -189,7 +197,7 @@ class LoopTrimNode:
         if not info.get("saved"):
             raise RuntimeError(f"Failed to find good loop (seam {info['seam']} > threshold).")
 
-        return (_VideoClip(trimmed), json.dumps(info, indent=2))
+        return (VideoFromFile(trimmed), json.dumps(info, indent=2))
 
     # helper to find the file path inside a VIDEO object
     def _resolve_path(self, vid):
