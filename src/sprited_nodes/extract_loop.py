@@ -1,61 +1,29 @@
-"""
-Loop detection and trimming for animated images and videos.
-Supports input formats: MP4, GIF, APNG, WebP
-Supports output formats: MP4, GIF, WebP
-"""
+# ────────────────────────────────────────────────────────────────────────────
+# LoopTrimNode – detect best seamless loop and spit out the trimmed clip
+# ────────────────────────────────────────────────────────────────────────────
+import json, tempfile, math
 import imageio.v3 as iio
 import numpy as np
 from PIL import Image
 import imagehash
 
+# ---- hashing helpers (unchanged) ------------------------------------------
 def phash_vec(img):
-    """Return perceptual hash as uint8 vector."""
-    h = imagehash.phash(img)
-    return h.hash.astype(np.uint8).flatten()
+    return imagehash.phash(img).hash.astype(np.uint8).flatten()
 
 def frame_distance(a, b):
-    """Hamming distance between hashes (0 = identical)."""
     return np.count_nonzero(a ^ b)
 
-def save_trimmed(frames, start, end, out_path, fps):
-    sliced = frames[start:end+1]
-    if out_path.lower().endswith(".gif"):
-        sliced[0].save(
-            out_path,
-            save_all=True,
-            append_images=sliced[1:],
-            loop=0,
-            duration=int(1000/fps),
-            disposal=2
-        )
-    elif out_path.lower().endswith(".webp"):
-        sliced[0].save(
-            out_path,
-            save_all=True,
-            append_images=sliced[1:],
-            loop=0,
-            duration=int(1000/fps),
-            method=6,  # Better compression
-            lossless=False,  # Set to True for lossless compression
-            quality=80  # Quality for lossy compression
-        )
-    else:
-        arr = [np.array(f) for f in sliced]
-        iio.imwrite(out_path, arr, fps=fps, codec="libx264", quality=8)
-
 def frame_vec(img, size=16):
-    """Simple grayscale downsample for autocorrelation."""
     return np.array(
         img.convert("L").resize((size, size), Image.NEAREST),
         dtype=np.float32
     ).flatten()
 
 def period_autocorr(frames, min_len=30, max_len=120):
-    """Estimate loop period via cosine-sim autocorrelation."""
     X = np.stack([frame_vec(f) for f in frames], axis=0)
     X /= (np.linalg.norm(X, axis=1, keepdims=True) + 1e-8)
     best_k, best_sim = 0, -1
-    # Only search up to half the sequence length to avoid trivial wrap
     for k in range(min_len, min(max_len, len(X)//2) + 1):
         sim = (X[:-k] * X[k:]).sum(axis=1).mean()
         if sim > best_sim:
@@ -63,7 +31,6 @@ def period_autocorr(frames, min_len=30, max_len=120):
     return best_k, best_sim
 
 def motion_profile(frames):
-    """Per-frame MSE to measure motion energy between consecutive frames."""
     mp = []
     for i in range(len(frames) - 1):
         a = np.asarray(frames[i], dtype=np.float32)
@@ -72,47 +39,54 @@ def motion_profile(frames):
     return np.array(mp)
 
 def score_segment(hashes, motion, start, length, lam=0.5):
-    """Score a candidate loop segment."""
     end = start + length
     seam = frame_distance(hashes[start], hashes[end])
     avg_mot = motion[start:end].mean()
-    # Penalize low motion; tweak as needed
-    repetition_penalty = 1.0 / (avg_mot + 1e-6)
-    total = seam + lam * repetition_penalty
+    total = seam + lam * (1.0 / (avg_mot + 1e-6))
     return total, seam, avg_mot
 
 def detect_best_loop(hashes, frames, min_len=20, max_len=120, lam=0.5):
-    """
-    Find loop using:
-      1) autocorr to guess period
-      2) score segments for low seam + high internal motion
-    """
     period, _ = period_autocorr(frames, min_len, max_len)
-    if period < min_len:
-        period = min_len
+    period = max(period, min_len)
     motion = motion_profile(frames)
-    n = len(frames)
-    best = (999999, 0, 0, 0, 0)  # total_score, start, end, seam, avg_mot
-    # Ensure we don't overflow end index
-    for start in range(0, n - period - 1):
+    best = (math.inf, 0, 0, 0, 0)
+    for start in range(0, len(frames) - period - 1):
         total, seam, avg_mot = score_segment(hashes, motion, start, period, lam)
         if total < best[0]:
             best = (total, start, start + period, seam, avg_mot)
-    return best
+    return best  # total, start, end, seam, avg_mot
 
-def cut_loop(
+def save_trimmed(frames, start, end, out_path, fps):
+    sliced = frames[start:end+1]
+    if out_path.lower().endswith(".gif"):
+        sliced[0].save(
+            out_path, save_all=True, append_images=sliced[1:],
+            loop=0, duration=int(1000/fps), disposal=2
+        )
+    elif out_path.lower().endswith(".webp"):
+        sliced[0].save(
+            out_path, save_all=True, append_images=sliced[1:],
+            loop=0, duration=int(1000/fps),
+            method=6, lossless=False, quality=80
+        )
+    else:  # mp4
+        arr = [np.array(f) for f in sliced]
+        iio.imwrite(out_path, arr, fps=fps,
+                    codec="libx264", quality=8, pixelformat="yuv420p")
+
+# ---- main worker ----------------------------------------------------------
+def _cut_loop_work(
     input_path: str,
-    out: str = "loop.webp",
-    min_gap: int = 10,
-    max_gap: int = 120,
-    threshold: int = 2,
-    limit: int = 0,
-    lam: float = 0.5
+    out_path: str,
+    min_gap: int,
+    max_gap: int,
+    threshold: int,
+    lam: float,
+    limit: int = 0
 ):
-    # Try FFMPEG first; fallback to generic readers for GIFs/APNGs/WebPs
-    fps = 12
+    fps = 12.0
+    # Load frames (FFmpeg for videos, PIL for webp/gif/apng)
     try:
-        # For WebP files, use PIL directly for better support
         if input_path.lower().endswith('.webp'):
             img = Image.open(input_path)
             frames = []
@@ -121,16 +95,10 @@ def cut_loop(
                     frames.append(img.copy())
                     img.seek(img.tell() + 1)
             except EOFError:
-                pass  # End of frames
-            
-            # Try to get duration from WebP metadata
+                pass
             if hasattr(img, 'info') and 'duration' in img.info:
-                duration_ms = img.info['duration']
-                fps = 1000.0 / duration_ms if duration_ms > 0 else 12
-            
-            frames_np = [np.array(f) for f in frames]
+                fps = 1000.0 / img.info['duration'] if img.info['duration'] else fps
         else:
-            # Use imageio for other formats
             try:
                 meta = iio.immeta(input_path, plugin="FFMPEG")
                 fps = meta.get("fps", fps)
@@ -139,35 +107,103 @@ def cut_loop(
                 frames_np = iio.imread(input_path)
             if frames_np.ndim == 3:
                 frames_np = frames_np[None, ...]
-            frames_np = [f for f in frames_np]
+            frames = [Image.fromarray(f) for f in frames_np]
     except Exception as e:
-        print(f"Error reading {input_path}: {e}")
-        return None
-    
+        raise RuntimeError(f"Could not read {input_path}: {e}")
+
     if limit > 0:
-        frames_np = frames_np[:limit]
-    frames = [Image.fromarray(f) if isinstance(f, np.ndarray) else f for f in frames_np]
+        frames = frames[:limit]
+
     hashes = [phash_vec(f) for f in frames]
     total, start, end, seam, avg_mot = detect_best_loop(
         hashes, frames, min_len=min_gap, max_len=max_gap, lam=lam
     )
-    print(f"Loop: {start}->{end} len={end-start} seam={seam}, avg_mot={avg_mot:.3f}, score={total:.3f}")
-    if seam <= threshold:
-        # Always skip the last frame to avoid double-hit
-        save_trimmed(frames, start, end - 1, out, fps)
-        print(f"Saved {out}")
-    else:
-        print("Seam too big. Raise threshold or preprocess.")
-    return {
+
+    info = {
         "start": start,
         "end": end,
         "length": end - start,
         "seam": seam,
-        "avg_motion": avg_mot,
-        "score": total,
+        "avg_motion": round(float(avg_mot), 6),
+        "score": round(float(total), 6),
         "fps": fps
     }
 
-if __name__ == "__main__":
-    import fire
-    fire.Fire(cut_loop)
+    if seam <= threshold:
+        save_trimmed(frames, start, end - 1, out_path, fps)
+        info["saved"] = True
+    else:
+        info["saved"] = False
+
+    return info, out_path if info["saved"] else None
+
+# ── ComfyUI node -----------------------------------------------------------
+class LoopTrimNode:
+    """
+    Detects the best seamless loop inside an animated clip and outputs
+    the trimmed VIDEO plus a JSON summary of what it found.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "video": ("VIDEO",),
+                "min_gap":    ("INT", {"default": 10, "min": 2,  "max": 240}),
+                "max_gap":    ("INT", {"default": 120,"min": 10, "max": 600}),
+                "threshold":  ("INT", {"default": 2,  "min": 0,  "max": 64}),
+                "lambda":     ("FLOAT", {"default": 0.5,"min": 0.0, "max": 5.0, "step": 0.1}),
+                "format":     (["mp4", "gif", "webp"], {"default": "webp"}),
+            },
+            "optional": {
+                "output_dir": ("STRING", {"default": ""}),
+            }
+        }
+
+    # one VIDEO + one STRING (json)
+    RETURN_TYPES     = ("VIDEO", "STRING")
+    RETURN_NAMES     = ("trimmed_video", "info_json")
+    CATEGORY         = "Video/Edit"
+    FUNCTION         = "run"
+
+    def run(self, video, min_gap, max_gap, threshold,
+            lambda_, format, output_dir=""):
+
+        # 1. Resolve path of input
+        src = self._resolve_path(video)
+        if not src:
+            raise RuntimeError("Cannot resolve input video path.")
+
+        # 2. Decide output path
+        out_dir = Path(output_dir) if output_dir else Path(tempfile.mkdtemp(prefix="looptrim_"))
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"{Path(src).stem}_loop.{format}"
+
+        # 3. Do the work
+        info, trimmed = _cut_loop_work(
+            src, str(out_path),
+            min_gap=min_gap, max_gap=max_gap,
+            threshold=threshold, lam=lambda_
+        )
+
+        if not info.get("saved"):
+            raise RuntimeError(f"Failed to find good loop (seam {info['seam']} > threshold).")
+
+        return (_VideoClip(trimmed), json.dumps(info, indent=2))
+
+    # helper to find the file path inside a VIDEO object
+    def _resolve_path(self, vid):
+        if isinstance(vid, str) and os.path.exists(vid):
+            return vid
+        for attr in ("video_path", "filename", "_VideoFromFile__file", "path"):
+            if hasattr(vid, attr) and os.path.exists(getattr(vid, attr)):
+                return getattr(vid, attr)
+        if isinstance(vid, dict):
+            for k in ("video_path", "filename", "path"):
+                if k in vid and os.path.exists(vid[k]):
+                    return vid[k]
+        if hasattr(vid, "save_to"):
+            tmp = Path(tempfile.mkdtemp(prefix="looptrim_src_")) / "src.mp4"
+            vid.save_to(str(tmp))
+            return str(tmp)
+        return None
