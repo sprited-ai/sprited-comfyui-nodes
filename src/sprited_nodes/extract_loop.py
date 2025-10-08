@@ -197,7 +197,13 @@ class LoopTrimNode:
         if not info.get("saved"):
             raise RuntimeError(f"Failed to find good loop (seam {info['seam']} > threshold).")
 
-        return (VideoFromFile(trimmed), json.dumps(info, indent=2))
+        def to_builtin(o):
+            if isinstance(o, (np.integer, np.floating)):
+                return o.item()
+            if isinstance(o, np.ndarray):
+                return o.tolist()
+            return str(o)
+        return (VideoFromFile(trimmed), json.dumps(info, indent=2, default=to_builtin))
 
     # helper to find the file path inside a VIDEO object
     def _resolve_path(self, vid):
