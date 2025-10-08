@@ -10,6 +10,7 @@ from .extract_loop import LoopTrimNode
 from .slice import SliceBatch, SliceLatents
 from .url_to_video import URLToVideo
 from .preview_video import PreviewVideo
+from .split_shot_by_cut_score import ShotSplitByCutScore
 
 # A dictionary that contains all nodes you want to export with their names
 # NOTE: names should be globally unique
@@ -19,6 +20,7 @@ NODE_CLASS_MAPPINGS = {
     "VideoShotSplitterV0": VideoShotSplitterV0,
     "VideoShotSplitterV2": VideoShotSplitterV2,
     "VideoShotSplitterV3": VideoShotSplitterV3,
+    "ShotSplitByCutScore": ShotSplitByCutScore,
     "LoopTrimNode": LoopTrimNode,
     "SliceBatch": SliceBatch,
     "SliceLatents": SliceLatents,
@@ -33,6 +35,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "VideoShotSplitterV0": "Video Shot Splitter V0 (Simple) 🌱",
     "VideoShotSplitterV2": "Video Shot Splitter V2 🌱",
     "VideoShotSplitterV3": "Video Shot Splitter V3 (K-Shots) 🌱",
+    "ShotSplitByCutScore": "Shot Split By Cut Score 🌱",
     "LoopTrimNode": "Loop Trim Node 🌱",
     "SliceBatch": "Image From Batch (Slice) 🌱",
     "SliceLatents": "Latent From Batch (Slice) 🌱",
