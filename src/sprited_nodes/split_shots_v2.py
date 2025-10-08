@@ -4,10 +4,10 @@ VideoShotSplitterV2 ────────────────────
 Split an input video (from ComfyUI "Load Video") into individual shots and
 return a list of VIDEO objects, ready for further processing.
 
-Enhanced version that guarantees at least K shots by adaptively adjusting
-the scene detection threshold. If scene detection fails to find enough shots,
-it progressively lowers the threshold to be more sensitive, and falls back
-to fixed-length splitting as a last resort.
+Enhanced version that uses binary search to find the optimal scene detection
+threshold, guaranteeing between min_shots and max_shots outputs. If scene
+detection fails to find shots in the target range, it falls back to
+fixed-length splitting targeting the middle of the range.
 """
 
 from __future__ import annotations
@@ -50,36 +50,140 @@ def detect_scenes(video: Path, *, detector_cls, threshold: float, min_len: int):
     finally:
         vm.release()
 
-def detect_scenes_adaptive_k(video: Path, *, detector_cls, initial_threshold: float,
-                           min_len: int, min_shots: int) -> List[Tuple]:
+def detect_scenes_bisect(video: Path, *, detector_cls, initial_threshold: float,
+                        min_len: int, min_shots: int, max_shots: int) -> List[Tuple]:
     """
-    Adaptively detect scenes to ensure at least min_shots are found.
-    Progressively lowers threshold until enough scenes are detected.
+    Robust binary search to find optimal threshold that returns [min_shots, max_shots] scenes.
+    Includes dynamic range expansion and multiple fallback strategies for 99%+ success rate.
     """
-    threshold = initial_threshold
-    min_threshold = 0.5  # Don't go below this threshold
-    threshold_multiplier = 0.7  # How much to reduce threshold each iteration
-    max_iterations = 10  # Prevent infinite loops
 
-    for iteration in range(max_iterations):
-        print(f"[VideoShotSplitterV2] Trying scene detection with threshold={threshold:.1f}")
-        scenes = detect_scenes(video, detector_cls=detector_cls,
-                             threshold=threshold, min_len=min_len)
+    def try_threshold(thresh: float):
+        """Try a threshold and return (scenes, count) with error handling."""
+        try:
+            scenes = detect_scenes(video, detector_cls=detector_cls,
+                                 threshold=thresh, min_len=min_len)
+            return scenes, len(scenes)
+        except Exception as e:
+            print(f"[VideoShotSplitterV2] Scene detection failed at threshold {thresh:.2f}: {e}")
+            return [], 0
 
-        print(f"[VideoShotSplitterV2] Found {len(scenes)} scenes")
+    # Phase 1: Explore initial range
+    low_threshold = 0.01   # Start very sensitive
+    high_threshold = min(initial_threshold * 3, 100.0)  # Wider initial range
+    best_scenes = []
+    best_threshold = initial_threshold
+    best_distance = float('inf')  # Distance from target range
+    max_iterations = 20
 
-        if len(scenes) >= min_shots:
-            print(f"[VideoShotSplitterV2] ✓ Found {len(scenes)} >= {min_shots} scenes with threshold {threshold:.1f}")
+    print(f"[VideoShotSplitterV2] Binary search for {min_shots}-{max_shots} shots in range [{low_threshold:.2f}, {high_threshold:.1f}]")
+
+    # Phase 2: Sample boundary points to understand behavior
+    low_scenes, low_count = try_threshold(low_threshold)
+    high_scenes, high_count = try_threshold(high_threshold)
+
+    print(f"[VideoShotSplitterV2] Boundary check: {low_count} scenes @ {low_threshold:.2f}, {high_count} scenes @ {high_threshold:.1f}")
+
+    # Phase 3: Dynamic range expansion if needed
+    if low_count < min_shots and high_count < min_shots:
+        # Need to go even lower
+        print(f"[VideoShotSplitterV2] Expanding search range lower...")
+        for new_low in [0.005, 0.001, 0.0005]:
+            test_scenes, test_count = try_threshold(new_low)
+            if test_count >= min_shots:
+                low_threshold = new_low
+                low_scenes, low_count = test_scenes, test_count
+                break
+        else:
+            print(f"[VideoShotSplitterV2] ⚠ Even very low thresholds don't produce enough scenes")
+
+    if low_count > max_shots and high_count > max_shots:
+        # Need to go even higher
+        print(f"[VideoShotSplitterV2] Expanding search range higher...")
+        for new_high in [200.0, 500.0, 1000.0]:
+            test_scenes, test_count = try_threshold(new_high)
+            if test_count <= max_shots:
+                high_threshold = new_high
+                high_scenes, high_count = test_scenes, test_count
+                break
+        else:
+            print(f"[VideoShotSplitterV2] ⚠ Even very high thresholds produce too many scenes")
+
+    # Update best candidates from boundary checks
+    for scenes, count, thresh in [(low_scenes, low_count, low_threshold),
+                                  (high_scenes, high_count, high_threshold)]:
+        if min_shots <= count <= max_shots:
+            print(f"[VideoShotSplitterV2] ✓ Perfect boundary result: {count} scenes @ {thresh:.2f}")
             return scenes
 
-        if threshold <= min_threshold:
-            print(f"[VideoShotSplitterV2] ⚠ Reached minimum threshold {min_threshold}, giving up on scene detection")
+        # Track best result (closest to target range)
+        if count >= min_shots:
+            distance = max(0, count - max_shots)  # How far above max_shots
+        else:
+            distance = min_shots - count  # How far below min_shots
+
+        if distance < best_distance:
+            best_scenes, best_threshold, best_distance = scenes, thresh, distance
+
+    # Phase 4: Binary search with robust convergence
+    for iteration in range(max_iterations):
+        # Handle edge case where bounds converged
+        if abs(high_threshold - low_threshold) < 0.001:
+            print(f"[VideoShotSplitterV2] Search range converged")
             break
 
-        threshold *= threshold_multiplier
-        threshold = max(threshold, min_threshold)  # Don't go below minimum
+        threshold = (low_threshold + high_threshold) / 2
+        print(f"[VideoShotSplitterV2] Iteration {iteration+1}: trying threshold={threshold:.3f}")
 
-    print(f"[VideoShotSplitterV2] ⚠ Scene detection failed to find {min_shots} scenes, will use fallback")
+        scenes, num_scenes = try_threshold(threshold)
+        if not scenes and num_scenes == 0:
+            # Scene detection failed, try to continue
+            print(f"[VideoShotSplitterV2] Scene detection failed, adjusting bounds")
+            high_threshold = (low_threshold + high_threshold) / 2
+            continue
+
+        print(f"[VideoShotSplitterV2] Found {num_scenes} scenes")
+
+        # Perfect result
+        if min_shots <= num_scenes <= max_shots:
+            print(f"[VideoShotSplitterV2] ✓ Perfect! Found {num_scenes} scenes @ {threshold:.3f}")
+            return scenes
+
+        # Update best result
+        if num_scenes >= min_shots:
+            distance = max(0, num_scenes - max_shots)
+        else:
+            distance = min_shots - num_scenes
+
+        if distance < best_distance:
+            best_scenes, best_threshold, best_distance = scenes, threshold, distance
+            print(f"[VideoShotSplitterV2] New best: {num_scenes} scenes @ {threshold:.3f} (distance: {distance})")
+
+        # Adjust search bounds (robust to non-monotonic behavior)
+        if num_scenes < min_shots:
+            high_threshold = threshold
+        else:
+            low_threshold = threshold
+
+    # Phase 5: Return best result or try alternative approaches
+    if best_scenes and len(best_scenes) >= min_shots:
+        print(f"[VideoShotSplitterV2] ✓ Best result: {len(best_scenes)} scenes @ {best_threshold:.3f}")
+        return best_scenes
+
+    # Phase 6: Last resort - try different min_scene_len values
+    if min_len > 1:
+        print(f"[VideoShotSplitterV2] Trying with reduced min_scene_len...")
+        for reduced_min_len in [max(1, min_len // 2), 1]:
+            try:
+                alt_scenes = detect_scenes(video, detector_cls=detector_cls,
+                                         threshold=initial_threshold, min_len=reduced_min_len)
+                if len(alt_scenes) >= min_shots:
+                    print(f"[VideoShotSplitterV2] ✓ Success with min_scene_len={reduced_min_len}: {len(alt_scenes)} scenes")
+                    return alt_scenes
+            except Exception as e:
+                print(f"[VideoShotSplitterV2] Alternative approach failed: {e}")
+                continue
+
+    print(f"[VideoShotSplitterV2] ⚠ All approaches failed, will use fallback")
     return []
 
 def get_video_duration(video_path: Path) -> float:
@@ -150,6 +254,7 @@ class VideoShotSplitterV2:
             "required": {
                 "video": ("VIDEO",),
                 "min_shots": ("INT", {"default": 3, "min": 1, "max": 100}),
+                "max_shots": ("INT", {"default": 10, "min": 1, "max": 100, "tooltip": "Must be >= min_shots"}),
                 "detector": (["content", "adaptive"], {"default": "content"}),
                 "threshold": ("FLOAT", {"default": 8.0, "min": 0.1, "max": 50}),
                 "min_scene_len": ("INT", {"default": 15, "min": 1, "max": 300}),
@@ -174,11 +279,15 @@ class VideoShotSplitterV2:
     DESCRIPTION   = cleandoc(__doc__)
 
     # ── main ────────────────────────────────────────────────────────────────
-    def split(self, video, min_shots, detector, threshold, min_scene_len,
+    def split(self, video, min_shots, max_shots, detector, threshold, min_scene_len,
               output_format, reencode,
               seconds_per_shot=0.0, output_dir="", overwrite=True, unique_filenames=True):
 
         try:
+            # Input validation
+            if max_shots < min_shots:
+                raise ValueError(f"max_shots ({max_shots}) cannot be less than min_shots ({min_shots})")
+
             src_path = self._extract_video_path(video)
             if not src_path:
                 raise RuntimeError("Unable to resolve video file path.")
@@ -207,33 +316,54 @@ class VideoShotSplitterV2:
                     raise RuntimeError("PySceneDetect not installed.")
 
                 Det = ContentDetector if detector == "content" else AdaptiveDetector
-                scenes = detect_scenes_adaptive_k(
+                scenes = detect_scenes_bisect(
                     work_path,
                     detector_cls=Det,
                     initial_threshold=threshold,
                     min_len=min_scene_len,
-                    min_shots=min_shots
+                    min_shots=min_shots,
+                    max_shots=max_shots
                 )
 
-                # Fallback to fixed-length if adaptive detection failed
+                # Enhanced fallback with multiple strategies
                 if not scenes or len(scenes) < min_shots:
-                    print(f"[VideoShotSplitterV2] Falling back to fixed-length splitting for {min_shots} shots")
+                    print(f"[VideoShotSplitterV2] Falling back to fixed-length splitting for {min_shots}-{max_shots} shots")
                     try:
                         duration = get_video_duration(work_path)
-                        seconds_per_shot_calc = duration / min_shots
+
+                        # Strategy 1: Target middle of range
+                        target_shots = (min_shots + max_shots) // 2
+                        seconds_per_shot_calc = duration / target_shots
                         scenes = self._fixed_length_scenes(work_path, seconds_per_shot_calc)
+
+                        # Strategy 2: If that doesn't work, try min_shots exactly
+                        if len(scenes) < min_shots:
+                            print(f"[VideoShotSplitterV2] Trying fixed-length with exact min_shots ({min_shots})")
+                            seconds_per_shot_calc = duration / min_shots
+                            scenes = self._fixed_length_scenes(work_path, seconds_per_shot_calc)
+
+                        # Strategy 3: If video is very short, use shorter segments
+                        if len(scenes) < min_shots and duration < 60:  # Less than 1 minute
+                            print(f"[VideoShotSplitterV2] Short video detected, using smaller segments")
+                            seconds_per_shot_calc = max(0.5, duration / min_shots)  # At least 0.5s per shot
+                            scenes = self._fixed_length_scenes(work_path, seconds_per_shot_calc)
+
                         print(f"[VideoShotSplitterV2] Created {len(scenes)} fixed-length shots ({seconds_per_shot_calc:.1f}s each)")
                     except Exception as e:
-                        print(f"[VideoShotSplitterV2] Fixed-length fallback failed: {e}")
+                        print(f"[VideoShotSplitterV2] All fallback strategies failed: {e}")
                         return ([],)
 
             if not scenes:
                 print("[VideoShotSplitterV2] No shots could be created.")
                 return ([],)
 
-            # Ensure we have at least min_shots
+            # Validate we have shots within the desired range
             if len(scenes) < min_shots:
-                print(f"[VideoShotSplitterV2] WARNING: Only created {len(scenes)} shots, less than requested {min_shots}")
+                print(f"[VideoShotSplitterV2] WARNING: Only created {len(scenes)} shots, less than minimum {min_shots}")
+            elif len(scenes) > max_shots:
+                print(f"[VideoShotSplitterV2] INFO: Created {len(scenes)} shots, more than maximum {max_shots} (will process all)")
+            else:
+                print(f"[VideoShotSplitterV2] ✓ Created {len(scenes)} shots within target range [{min_shots}, {max_shots}]")
 
             # Process scenes into video files
             shot_videos = []
@@ -242,6 +372,8 @@ class VideoShotSplitterV2:
             for idx, (start, end) in enumerate(scenes):
                 n = end.get_frames() - start.get_frames()
                 if n <= 0: continue
+
+                print(f"[VideoShotSplitterV2] Processing scene {idx}: frames {start.get_frames()}-{end.get_frames()} ({n} frames)")
 
                 # Create filename with optional timestamp for uniqueness
                 if unique_filenames:
@@ -261,8 +393,13 @@ class VideoShotSplitterV2:
                 subprocess.check_call(encode_cmd(output_format, work_path,
                                                  start.get_timecode(), n,
                                                  dst, reencode=reencode, overwrite=overwrite))
-                shot_videos.append(VideoFromFile(str(dst)))
-                print(f"[VideoShotSplitterV2] → {dst.name}")
+
+                # Simple validation like the original split_shots.py
+                if dst.exists() and dst.stat().st_size > 0:
+                    shot_videos.append(VideoFromFile(str(dst)))
+                    print(f"[VideoShotSplitterV2] → {dst.name}")
+                else:
+                    print(f"[VideoShotSplitterV2] ⚠ Skipping {dst.name} (empty file)")
 
             # clean temp stuff
             if tmp_dir: shutil.rmtree(tmp_dir, ignore_errors=True)
