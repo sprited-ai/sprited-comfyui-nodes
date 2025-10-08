@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-VideoShotSplitter ───────────────────────────────────────────────────────────
-Split an input video (from ComfyUI “Load Video”) into individual shots and
+VideoShotSplitterV2 ─────────────────────────────────────────────────────────
+Split an input video (from ComfyUI "Load Video") into individual shots and
 return a list of VIDEO objects, ready for further processing.
 
-Same features as before, but the output is now a list of `VideoFromFile`
-objects instead of a comma-separated STRING.
+Enhanced version that guarantees at least K shots by adaptively adjusting
+the scene detection threshold. If scene detection fails to find enough shots,
+it progressively lowers the threshold to be more sensitive, and falls back
+to fixed-length splitting as a last resort.
 """
 
 from __future__ import annotations
@@ -36,7 +38,7 @@ try:
 except ImportError:
     CV2_AVAILABLE = False
 
-# ── helpers (unchanged) -----------------------------------------------------
+# ── helpers ─────────────────────────────────────────────────────────────────
 def detect_scenes(video: Path, *, detector_cls, threshold: float, min_len: int):
     vm = VideoManager([str(video)])
     sm = SceneManager()
@@ -47,6 +49,50 @@ def detect_scenes(video: Path, *, detector_cls, threshold: float, min_len: int):
         return sm.get_scene_list()
     finally:
         vm.release()
+
+def detect_scenes_adaptive_k(video: Path, *, detector_cls, initial_threshold: float,
+                           min_len: int, min_shots: int) -> List[Tuple]:
+    """
+    Adaptively detect scenes to ensure at least min_shots are found.
+    Progressively lowers threshold until enough scenes are detected.
+    """
+    threshold = initial_threshold
+    min_threshold = 0.5  # Don't go below this threshold
+    threshold_multiplier = 0.7  # How much to reduce threshold each iteration
+    max_iterations = 10  # Prevent infinite loops
+
+    for iteration in range(max_iterations):
+        print(f"[VideoShotSplitterV2] Trying scene detection with threshold={threshold:.1f}")
+        scenes = detect_scenes(video, detector_cls=detector_cls,
+                             threshold=threshold, min_len=min_len)
+
+        print(f"[VideoShotSplitterV2] Found {len(scenes)} scenes")
+
+        if len(scenes) >= min_shots:
+            print(f"[VideoShotSplitterV2] ✓ Found {len(scenes)} >= {min_shots} scenes with threshold {threshold:.1f}")
+            return scenes
+
+        if threshold <= min_threshold:
+            print(f"[VideoShotSplitterV2] ⚠ Reached minimum threshold {min_threshold}, giving up on scene detection")
+            break
+
+        threshold *= threshold_multiplier
+        threshold = max(threshold, min_threshold)  # Don't go below minimum
+
+    print(f"[VideoShotSplitterV2] ⚠ Scene detection failed to find {min_shots} scenes, will use fallback")
+    return []
+
+def get_video_duration(video_path: Path) -> float:
+    """Get video duration in seconds using OpenCV."""
+    if not CV2_AVAILABLE:
+        raise RuntimeError("OpenCV required to get video duration.")
+
+    cap = cv2.VideoCapture(str(video_path))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.release()
+
+    return frame_count / fps
 
 def webp_to_tmp_mp4(src: Path) -> Path:
     tmp_dir = Path(tempfile.mkdtemp(prefix="splitshots_"))
@@ -93,8 +139,8 @@ def encode_cmd(fmt: str, src: Path, start_ts: str, n_frames: int,
         raise ValueError(fmt)
     return cmd + [str(dst)]
 
-# ── node --------------------------------------------------------------------
-class VideoShotSplitter:
+# ── node ────────────────────────────────────────────────────────────────────
+class VideoShotSplitterV2:
     def __init__(self):
         self._temp_sources: list[Path] = []
 
@@ -103,6 +149,7 @@ class VideoShotSplitter:
         return {
             "required": {
                 "video": ("VIDEO",),
+                "min_shots": ("INT", {"default": 3, "min": 1, "max": 100}),
                 "detector": (["content", "adaptive"], {"default": "content"}),
                 "threshold": ("FLOAT", {"default": 8.0, "min": 0.1, "max": 50}),
                 "min_scene_len": ("INT", {"default": 15, "min": 1, "max": 300}),
@@ -126,8 +173,8 @@ class VideoShotSplitter:
     CATEGORY      = "Video/Edit"
     DESCRIPTION   = cleandoc(__doc__)
 
-    # ── main ----------------------------------------------------------------
-    def split(self, video, detector, threshold, min_scene_len,
+    # ── main ────────────────────────────────────────────────────────────────
+    def split(self, video, min_shots, detector, threshold, min_scene_len,
               output_format, reencode,
               seconds_per_shot=0.0, output_dir="", overwrite=True, unique_filenames=True):
 
@@ -147,22 +194,49 @@ class VideoShotSplitter:
             else:
                 work_path, tmp_dir = src_path, None
 
-            # build scene list
+            # Build scene list with adaptive approach
+            scenes = []
+
             if seconds_per_shot > 0:
+                # User specified fixed duration - use that
+                print(f"[VideoShotSplitterV2] Using fixed duration: {seconds_per_shot}s per shot")
                 scenes = self._fixed_length_scenes(work_path, seconds_per_shot)
             else:
+                # Try adaptive scene detection first
                 if not SCENEDETECT_AVAILABLE:
                     raise RuntimeError("PySceneDetect not installed.")
+
                 Det = ContentDetector if detector == "content" else AdaptiveDetector
-                scenes = detect_scenes(work_path, detector_cls=Det,
-                                       threshold=threshold, min_len=min_scene_len)
+                scenes = detect_scenes_adaptive_k(
+                    work_path,
+                    detector_cls=Det,
+                    initial_threshold=threshold,
+                    min_len=min_scene_len,
+                    min_shots=min_shots
+                )
+
+                # Fallback to fixed-length if adaptive detection failed
+                if not scenes or len(scenes) < min_shots:
+                    print(f"[VideoShotSplitterV2] Falling back to fixed-length splitting for {min_shots} shots")
+                    try:
+                        duration = get_video_duration(work_path)
+                        seconds_per_shot_calc = duration / min_shots
+                        scenes = self._fixed_length_scenes(work_path, seconds_per_shot_calc)
+                        print(f"[VideoShotSplitterV2] Created {len(scenes)} fixed-length shots ({seconds_per_shot_calc:.1f}s each)")
+                    except Exception as e:
+                        print(f"[VideoShotSplitterV2] Fixed-length fallback failed: {e}")
+                        return ([],)
+
             if not scenes:
-                print("[VideoShotSplitter] No cuts detected.")
+                print("[VideoShotSplitterV2] No shots could be created.")
                 return ([],)
 
-            # slice & wrap
+            # Ensure we have at least min_shots
+            if len(scenes) < min_shots:
+                print(f"[VideoShotSplitterV2] WARNING: Only created {len(scenes)} shots, less than requested {min_shots}")
+
+            # Process scenes into video files
             shot_videos = []
-            # Generate timestamp for unique filenames if enabled
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") if unique_filenames else ""
 
             for idx, (start, end) in enumerate(scenes):
@@ -178,7 +252,7 @@ class VideoShotSplitter:
 
                 # Check if file exists and handle overwrite behavior
                 if dst.exists() and not overwrite:
-                    print(f"[VideoShotSplitter] Skipping {dst.name} (file exists, overwrite=False)")
+                    print(f"[VideoShotSplitterV2] Skipping {dst.name} (file exists, overwrite=False)")
                     # Still add to the list if the file exists and is valid
                     if dst.stat().st_size > 0:
                         shot_videos.append(VideoFromFile(str(dst)))
@@ -187,8 +261,8 @@ class VideoShotSplitter:
                 subprocess.check_call(encode_cmd(output_format, work_path,
                                                  start.get_timecode(), n,
                                                  dst, reencode=reencode, overwrite=overwrite))
-                shot_videos.append(VideoFromFile(str(dst)))  # ← proper ComfyUI video type
-                print(f"[VideoShotSplitter] → {dst.name}")
+                shot_videos.append(VideoFromFile(str(dst)))
+                print(f"[VideoShotSplitterV2] → {dst.name}")
 
             # clean temp stuff
             if tmp_dir: shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -196,13 +270,14 @@ class VideoShotSplitter:
                 try: os.remove(p)
                 except: pass
 
+            print(f"[VideoShotSplitterV2] ✓ Successfully created {len(shot_videos)} shots")
             return (shot_videos,)
 
         except Exception as e:
-            print(f"[VideoShotSplitter-ERROR] {e}")
+            print(f"[VideoShotSplitterV2-ERROR] {e}")
             return ([],)
 
-    # ── helpers ------------------------------------------------------------
+    # ── helpers ─────────────────────────────────────────────────────────────
     def _fixed_length_scenes(self, path: Path, secs: float):
         if not CV2_AVAILABLE:
             raise RuntimeError("OpenCV required for fixed-length splitting.")

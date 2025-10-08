@@ -137,13 +137,11 @@ def _cut_loop_work(
         "fps": fps
     }
 
-    if seam <= threshold:
-        save_trimmed(frames, start, end - 1, out_path, fps)
-        info["saved"] = True
-    else:
-        info["saved"] = False
+    # Always save the best loop found, regardless of seam quality
+    save_trimmed(frames, start, end - 1, out_path, fps)
+    info["saved"] = True
 
-    return info, out_path if info["saved"] else None
+    return info, out_path
 
 # ── ComfyUI node -----------------------------------------------------------
 class LoopTrimNode:
@@ -194,9 +192,7 @@ class LoopTrimNode:
             threshold=threshold, lam=lambda_
         )
 
-        if not info.get("saved"):
-            raise RuntimeError(f"Failed to find good loop (seam {info['seam']} > threshold).")
-
+        # Always return the result - no more failure on poor seam quality
         def to_builtin(o):
             if isinstance(o, (np.integer, np.floating)):
                 return o.item()
