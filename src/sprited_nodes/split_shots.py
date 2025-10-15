@@ -71,27 +71,32 @@ def webp_to_tmp_mp4(src: Path) -> Path:
     for p in glob.glob(str(frames / "frm*.png")): os.remove(p)
     return dst
 
-def encode_cmd(fmt: str, src: Path, start_ts: str, n_frames: int,
+def encode_cmd(fmt: str, src: Path, start_ts: str, n_frames: int | None,
                dst: Path, *, reencode: bool, overwrite: bool = True) -> List[str]:
     base_args = ["-hide_banner", "-loglevel", "error"]
     if overwrite:
         base_args.append("-y")
 
+    # Build base input
+    cmd = ["ffmpeg"] + base_args + ["-ss", start_ts, "-i", str(src)]
+
+    # Limit by frame count if provided
+    if n_frames is not None and n_frames > 0:
+        cmd += ["-frames:v", str(n_frames)]
+
+    # Copy/reencode by format
     if fmt == "mp4" and not reencode:
-        return ["ffmpeg"] + base_args + [
-                "-ss", start_ts, "-i", str(src),
-                "-frames:v", str(n_frames), "-c", "copy", str(dst)]
-    cmd = ["ffmpeg"] + base_args + [
-           "-ss", start_ts, "-i", str(src), "-frames:v", str(n_frames)]
-    if fmt == "mp4":
-        cmd += ["-c:v", "libx264", "-crf", "0", "-preset", "veryslow",
-                "-pix_fmt", "yuv444p"]
-    elif fmt == "webp":
-        cmd += ["-an", "-vcodec", "libwebp", "-lossless", "1",
-                "-preset", "default", "-loop", "0", "-vsync", "0"]
+        cmd += ["-c", "copy"]
     else:
-        raise ValueError(fmt)
+        if fmt == "mp4":
+            cmd += ["-c:v", "libx264", "-crf", "0", "-preset", "veryslow", "-pix_fmt", "yuv444p"]
+        elif fmt == "webp":
+            cmd += ["-an", "-vcodec", "libwebp", "-lossless", "1", "-preset", "default", "-loop", "0", "-vsync", "0"]
+        else:
+            raise ValueError(fmt)
+
     return cmd + [str(dst)]
+
 
 # ── node --------------------------------------------------------------------
 class VideoShotSplitter:
@@ -104,7 +109,7 @@ class VideoShotSplitter:
             "required": {
                 "video": ("VIDEO",),
                 "detector": (["content", "adaptive"], {"default": "content"}),
-                "threshold": ("FLOAT", {"default": 8.0, "min": 0.1, "max": 50}),
+                "threshold": ("FLOAT", {"default": 10.0, "min": 0.1, "max": 50}),
                 "min_scene_len": ("INT", {"default": 15, "min": 1, "max": 300}),
                 "output_format": (["mp4", "webp"], {"default": "mp4"}),
                 "reencode": ("BOOLEAN", {"default": False}),
@@ -157,8 +162,10 @@ class VideoShotSplitter:
                 scenes = detect_scenes(work_path, detector_cls=Det,
                                        threshold=threshold, min_len=min_scene_len)
             if not scenes:
-                print("[VideoShotSplitter] No cuts detected.")
-                return ([],)
+                print("[VideoShotSplitter] No cuts detected. Falling back to single full-length shot.")
+                # Force one "scene": start=0, unknown length → pass n_frames=None so we copy full stream
+                scenes = [(FrameTimecode(0, 30 if not SCENEDETECT_AVAILABLE else FrameTimecode.BASE_FRAMERATE),
+                           FrameTimecode(0, 30 if not SCENEDETECT_AVAILABLE else FrameTimecode.BASE_FRAMERATE))]
 
             # slice & wrap
             shot_videos = []
@@ -166,8 +173,11 @@ class VideoShotSplitter:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") if unique_filenames else ""
 
             for idx, (start, end) in enumerate(scenes):
+                # If start==end (fallback single-shot), let ffmpeg copy full stream by passing n_frames=None
+                full_copy = (start.get_frames() == end.get_frames())
                 n = end.get_frames() - start.get_frames()
-                if n <= 0: continue
+                if not full_copy and n <= 0:
+                    continue
 
                 # Create filename with optional timestamp for uniqueness
                 if unique_filenames:
@@ -184,9 +194,12 @@ class VideoShotSplitter:
                         shot_videos.append(VideoFromFile(str(dst)))
                     continue
 
-                subprocess.check_call(encode_cmd(output_format, work_path,
-                                                 start.get_timecode(), n,
-                                                 dst, reencode=reencode, overwrite=overwrite))
+                subprocess.check_call(
+                    encode_cmd(output_format, work_path,
+                               start.get_timecode() if hasattr(start, "get_timecode") else "0",
+                               None if full_copy else n,
+                               dst, reencode=reencode, overwrite=overwrite)
+                )
                 shot_videos.append(VideoFromFile(str(dst)))  # ← proper ComfyUI video type
                 print(f"[VideoShotSplitter] → {dst.name}")
 
@@ -199,8 +212,9 @@ class VideoShotSplitter:
             return (shot_videos,)
 
         except Exception as e:
+            # These are programmatic errors, not "no scenes" situations
             print(f"[VideoShotSplitter-ERROR] {e}")
-            return ([],)
+            raise
 
     # ── helpers ------------------------------------------------------------
     def _fixed_length_scenes(self, path: Path, secs: float):

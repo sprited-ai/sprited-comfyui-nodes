@@ -157,20 +157,7 @@ def _pick_top_k_minus_1(scores: np.ndarray, k: int, nms_radius: int, min_len: in
 class ShotSplitByCutScore:
     """
     Split an IMAGE sequence into k shots by selecting k-1 highest cut-likelihood transitions.
-
-    Inputs
-    ------
-    images:   IMAGE (batched [N,H,W,C])
-    k:        number of shots
-    window:   sliding window half-size for smoothing (0 = no smoothing)
-    metric:   similarity metric for cut scoring
-    nms_radius: suppress picks within this radius
-    min_len:  minimum frames per shot
-
-    Outputs
-    -------
-    shot_images: list[IMAGE]  (k IMAGE batches)
-    cut_indices: INT          (list of cut locations between frames)
+    If cut likelihoods are weak (below cut_threshold), duplicate the last segment until k.
     """
 
     @classmethod
@@ -183,40 +170,61 @@ class ShotSplitByCutScore:
                 "metric": (["l2", "ssim", "hist"], {"default": "l2"}),
                 "nms_radius": ("INT", {"default": 2, "min": 0, "max": 60}),
                 "min_len": ("INT", {"default": 8, "min": 1, "max": 2000}),
+                # NEW: threshold below which we consider transitions "not real"
+                "cut_threshold": ("FLOAT", {"default": 0.05, "min": 0.0, "max": 10.0}),
             }
         }
 
     RETURN_TYPES = ("IMAGE", "INT",)
     RETURN_NAMES = ("shot_images", "cut_indices",)
-    OUTPUT_IS_LIST = (True, True)   # First is list[IMAGE], second is list[int]
+    OUTPUT_IS_LIST = (True, True)
     FUNCTION = "split"
     CATEGORY = "Image/Sequence"
 
-    def split(self, images, k, window, metric, nms_radius, min_len):
+    def split(self, images, k, window, metric, nms_radius, min_len, cut_threshold):
         frames = _to_numpy_frames(images)
         n = len(frames)
 
         if n == 0:
             print("[ShotSplitByCutScore] Empty input batch.")
-            return ([], [])
-        if n < 3 and k > 1:
-            print("[ShotSplitByCutScore] Not enough frames for multiple shots; returning single shot.")
-            k = 1
-        k = max(1, min(k, n))  # cannot exceed frames
+            # Return k empty batches
+            empty = _to_image_batch([])
+            return ([empty for _ in range(max(1, k))], [])
 
-        # Scores are for transitions between t and t+1 => length n-1
+        # Each segment must have ≥1 frame → cannot exceed n
+        k = max(1, min(k, n))
+
+        # Scores for transitions between t and t+1 (length n-1)
         scores = _sliding_window_scores(frames, window=window, metric=metric)
 
-        # Choose cut positions
-        cuts = _pick_top_k_minus_1(scores, k=k, nms_radius=nms_radius, min_len=min_len, n_frames=n)
+        # If there are no transitions (n<2) or everything is too flat, duplicate whole seq.
+        if scores.size == 0 or (scores.max() < cut_threshold):
+            print(f"[ShotSplitByCutScore] max score too low ({scores.max() if scores.size else 'N/A'}) < {cut_threshold}; repeating full sequence x{k}.")
+            full = _to_image_batch(frames)
+            return ([full] * k, [])
 
-        # Build segments from cuts
-        boundaries = [-1] + cuts + [n-1]  # frame indices; segment is (prev_cut+1 .. cut)
+        # Peak-pick (NMS + min_len feasibility)
+        raw_cuts = _pick_top_k_minus_1(scores, k=k, nms_radius=nms_radius, min_len=min_len, n_frames=n)
+
+        # Filter by cut_threshold (only keep strong-enough transitions)
+        cuts = [c for c in raw_cuts if scores[c] >= cut_threshold]
+
+        # Build segments from the remaining cuts
+        boundaries = [-1] + cuts + [n - 1]  # inclusive end
         shot_batches = []
-        for i in range(len(boundaries)-1):
+        for i in range(len(boundaries) - 1):
             start = boundaries[i] + 1
-            end   = boundaries[i+1]       # inclusive
-            seg = frames[start:end+1]
+            end = boundaries[i + 1]
+            if end < start:
+                start, end = end, end
+            seg = frames[start : end + 1]
             shot_batches.append(_to_image_batch(seg))
 
+        # If we still have fewer than k segments, repeat the last segment
+        if len(shot_batches) < k:
+            last = shot_batches[-1] if shot_batches else _to_image_batch(frames)
+            while len(shot_batches) < k:
+                shot_batches.append(last)   # use same tensor reference; .clone() if deep copy desired
+
+        # Do not invent indices for duplicated segments; return only true cut indices that passed threshold
         return (shot_batches, cuts)

@@ -11,6 +11,7 @@ from .slice import SliceBatch, SliceLatents
 from .url_to_video import URLToVideo
 from .preview_video import PreviewVideo
 from .split_shot_by_cut_score import ShotSplitByCutScore
+from .pixel_stats import PixelRGBStats
 
 # A dictionary that contains all nodes you want to export with their names
 # NOTE: names should be globally unique
@@ -25,7 +26,8 @@ NODE_CLASS_MAPPINGS = {
     "SliceBatch": SliceBatch,
     "SliceLatents": SliceLatents,
     "URLToVideo": URLToVideo,
-    "PreviewVideo": PreviewVideo
+    "PreviewVideo": PreviewVideo,
+    "PixelRGBStats": PixelRGBStats
 }
 
 # A dictionary that contains the friendly/humanly readable titles for the nodes
@@ -40,5 +42,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SliceBatch": "Image From Batch (Slice) 🌱",
     "SliceLatents": "Latent From Batch (Slice) 🌱",
     "URLToVideo": "URL to Video 🌱",
-    "PreviewVideo": "Preview Video 🌱"
+    "PreviewVideo": "Preview Video 🌱",
+    "PixelRGBStats": "Pixel Stats (SpriteDX) 🌱"
 }
