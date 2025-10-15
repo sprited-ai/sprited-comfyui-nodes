@@ -54,13 +54,39 @@ def weighted_global_mean_std(rgb_list, weight_list):
 
     return float(global_mean), float(global_std)
 
+def weighted_per_frame_mean_std(rgb_list, weight_list):
+    """Compute per-frame weighted mean/std across all color channels for each frame."""
+    frame_means = []
+    frame_stds = []
+
+    for rgb, weight in zip(rgb_list, weight_list):
+        h, w, c = rgb.shape
+        # Flatten spatial dimensions and stack all channels
+        pixels = rgb.reshape(-1)  # Shape: (h*w*c,)
+        weights = np.broadcast_to(weight[..., None], (h, w, c)).reshape(-1)  # Shape: (h*w*c,)
+
+        # Compute weighted statistics for this frame
+        total_weight = np.sum(weights) + 1e-8
+        frame_mean = np.sum(pixels * weights) / total_weight
+        frame_var = np.sum(weights * (pixels - frame_mean) ** 2) / total_weight
+        frame_std = np.sqrt(frame_var)
+
+        frame_means.append(float(frame_mean))
+        frame_stds.append(float(frame_std))
+
+    return frame_means, frame_stds
+
 class PixelRGBStats:
     """
-    Computes global weighted mean and std across all frames and all color channels.
+    Computes both global and per-frame weighted mean and std across all color channels.
     The mask values [0–1] act as weights; if omitted, all pixels are weighted equally.
     Returns:
-        mean = single number (global mean)
-        std  = single number (global std)
+        global_mean = single number (global mean across all frames and channels)
+        global_std  = single number (global std across all frames and channels)
+        frame_means = list of numbers (mean for each frame across all channels)
+        frame_stds  = list of numbers (std for each frame across all channels)
+        max_mean    = single number (maximum frame mean)
+        max_std     = single number (maximum frame std)
     """
 
     @classmethod
@@ -70,8 +96,8 @@ class PixelRGBStats:
             "optional": {"mask": ("MASK",)},
         }
 
-    RETURN_TYPES = ("FLOAT", "FLOAT",)
-    RETURN_NAMES = ("mean", "std",)
+    RETURN_TYPES = ("FLOAT", "FLOAT", "LIST", "LIST", "FLOAT", "FLOAT",)
+    RETURN_NAMES = ("global_mean", "global_std", "frame_means", "frame_stds", "max_mean", "max_std",)
     FUNCTION = "run"
     CATEGORY = "SpriteDX/Analysis"
 
@@ -79,9 +105,17 @@ class PixelRGBStats:
         rgb_list = image_tensor_to_rgb_list(image)
         mask_list = mask_tensor_to_weight_list(mask, rgb_list)
 
+        # Compute global statistics
         global_mean, global_std = weighted_global_mean_std(rgb_list, mask_list)
 
-        return (global_mean, global_std)
+        # Compute per-frame statistics
+        frame_means, frame_stds = weighted_per_frame_mean_std(rgb_list, mask_list)
+
+        # Compute max statistics
+        max_mean = float(max(frame_means)) if frame_means else 0.0
+        max_std = float(max(frame_stds)) if frame_stds else 0.0
+
+        return (global_mean, global_std, frame_means, frame_stds, max_mean, max_std)
 
 NODE_CLASS_MAPPINGS = {"PixelRGBStats": PixelRGBStats}
 NODE_DISPLAY_NAME_MAPPINGS = {"PixelRGBStats": "Pixel RGB Stats"}
