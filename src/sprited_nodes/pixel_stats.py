@@ -87,6 +87,8 @@ class PixelRGBStats:
         frame_stds  = list of numbers (std for each frame across all channels)
         max_mean    = single number (maximum frame mean)
         max_std     = single number (maximum frame std)
+        min_mean    = single number (minimum frame mean)
+        min_std     = single number (minimum frame std)
     """
 
     @classmethod
@@ -96,8 +98,8 @@ class PixelRGBStats:
             "optional": {"mask": ("MASK",)},
         }
 
-    RETURN_TYPES = ("FLOAT", "FLOAT", "LIST", "LIST", "FLOAT", "FLOAT",)
-    RETURN_NAMES = ("global_mean", "global_std", "frame_means", "frame_stds", "max_mean", "max_std",)
+    RETURN_TYPES = ("FLOAT", "FLOAT", "LIST", "LIST", "FLOAT", "FLOAT", "FLOAT", "FLOAT",)
+    RETURN_NAMES = ("global_mean", "global_std", "frame_means", "frame_stds", "max_mean", "max_std", "min_mean", "min_std",)
     FUNCTION = "run"
     CATEGORY = "SpriteDX/Analysis"
 
@@ -111,11 +113,13 @@ class PixelRGBStats:
         # Compute per-frame statistics
         frame_means, frame_stds = weighted_per_frame_mean_std(rgb_list, mask_list)
 
-        # Compute max statistics
+        # Compute max and min statistics
         max_mean = float(max(frame_means)) if frame_means else 0.0
         max_std = float(max(frame_stds)) if frame_stds else 0.0
+        min_mean = float(min(frame_means)) if frame_means else 0.0
+        min_std = float(min(frame_stds)) if frame_stds else 0.0
 
-        return (global_mean, global_std, frame_means, frame_stds, max_mean, max_std)
+        return (global_mean, global_std, frame_means, frame_stds, max_mean, max_std, min_mean, min_std)
 
 NODE_CLASS_MAPPINGS = {"PixelRGBStats": PixelRGBStats}
 NODE_DISPLAY_NAME_MAPPINGS = {"PixelRGBStats": "Pixel RGB Stats"}
