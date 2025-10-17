@@ -24,7 +24,7 @@ def detect_cuts_visual(
     ]
 
     diffs = np.array(
-        [np.mean(np.abs(grays[i - 1] - grays[i])) for i in range(0, len(grays) - 1)]
+        [np.mean(np.abs(grays[i - 1] - grays[i])) for i in range(1, len(grays))]
     )
 
     diffs = (diffs - diffs.min()) / (diffs.max() - diffs.min() + 1e-8)
