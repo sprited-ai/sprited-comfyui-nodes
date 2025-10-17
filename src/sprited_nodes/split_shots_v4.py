@@ -25,7 +25,7 @@ def detect_cuts_visual(
     ]
 
     diffs = np.array(
-        [np.mean(np.abs(grays[i] - grays[i - 1])) for i in range(1, len(grays))]
+        [np.mean(np.abs(grays[i - 1] - grays[i])) for i in range(0, len(grays) - 1)]
     )
 
     if smooth_window > 1:
@@ -39,7 +39,7 @@ def detect_cuts_visual(
         top_idx = np.argsort(diffs[peaks])[-(k - 1) :]
         peaks = sorted(peaks[top_idx])
 
-    return list(enumerate(diffs, start=1)), peaks
+    return list(enumerate(diffs)), peaks
 
 
 # ---------------------------------------------------------------------
