@@ -10,6 +10,10 @@ imagehash>=4.2.0
 imageio>=2.25.0
 Pillow>=8.0.0
 numpy>=1.20.0
+scipy
+fire
+matplotlib
+
 
 # Additional video processing tools (optional but recommended)
 # ffmpeg-python>=0.2.0  # Python wrapper for FFmpeg (optional)
@@ -17,7 +21,7 @@ numpy>=1.20.0
 # Note: This package also requires FFmpeg to be installed on the system
 # FFmpeg installation instructions:
 # - Ubuntu/Debian: sudo apt install ffmpeg
-# - macOS: brew install ffmpeg  
+# - macOS: brew install ffmpeg
 # - Windows: Download from https://ffmpeg.org/download.html
 #
 # For WebP support, you may also need:
