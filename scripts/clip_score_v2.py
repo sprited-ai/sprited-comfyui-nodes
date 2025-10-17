@@ -15,8 +15,6 @@ def get_clip_scores_batch(images, prompts, model, processor):
         logits_per_image = outputs.logits_per_image  # shape: [n_frames, n_prompts]
         scores = logits_per_image.softmax(dim=1).tolist()
     return scores  # shape: [n_frames, n_prompts]
-
-
 def main(webp_path, prompts=None, batch_size=32, model_name="openai/clip-vit-base-patch16"):
     """
     Compute CLIP scores for all frames in a webp animation file.
@@ -66,21 +64,42 @@ def main(webp_path, prompts=None, batch_size=32, model_name="openai/clip-vit-bas
     if len(diff_scores) < num_frames:
         diff_scores = [0.0] + diff_scores
 
-    # Plot the probabilities for each prompt over timesteps and the diff scores
+    # Plot the first derivative of probabilities for each prompt over timesteps and the diff scores
     all_scores_tensor = torch.tensor(all_scores)  # shape: [num_frames, num_prompts]
     timesteps = range(num_frames)
     plt.figure(figsize=(10, 6))
+    derivatives = []
     for i, prompt in enumerate(prompts):
-        plt.plot(timesteps, all_scores_tensor[:, i], label=prompt)
+        # Compute first derivative (difference between consecutive frames)
+        derivative = all_scores_tensor[:, i].numpy()
+        derivative = derivative[1:] - derivative[:-1]
+        abs_derivative = abs(derivative)
+        derivatives.append(abs_derivative)
+        plt.plot(timesteps[1:], derivative, label=f"{prompt} (derivative)")
     # Plot diff scores (scene cut diff)
     plt.plot(timesteps, diff_scores, label='Scene Cut Diff', color='black', linestyle='--', alpha=0.7)
+
+    # Compute Euclidean norm of absolute derivatives for each frame (excluding first frame)
+    if derivatives:
+        # Stack derivatives: shape [num_prompts, num_frames-1]
+        derivatives_arr = torch.stack([torch.tensor(d) for d in derivatives])  # shape: [num_prompts, num_frames-1]
+        # Euclidean norm across prompts for each frame
+        euclidean_norm = torch.sqrt(torch.sum(derivatives_arr ** 2, dim=0)).numpy()  # shape: [num_frames-1]
+    else:
+        euclidean_norm = None
+    diff_scores_arr = torch.tensor(diff_scores[1:])  # skip first frame for alignment
+    # Weighted average: 0.25 * euclidean_norm + 0.75 * diff_score
+    if euclidean_norm is not None:
+        weighted_avg = euclidean_norm + diff_scores_arr.numpy()
+        plt.plot(timesteps[1:], weighted_avg, label='Weighted Avg (Euclidean Derivatives & Diff)', color='red', linewidth=2)
+
     plt.xlabel('Frame (Timestep)')
-    plt.ylabel('Probability / Diff Score')
-    plt.title('CLIP Prompt Probabilities and Scene Cut Diff Over Time')
+    plt.ylabel('First Derivative / Diff Score')
+    plt.title('First Derivative of CLIP Prompt Probabilities and Scene Cut Diff Over Time')
     plt.legend()
     plt.tight_layout()
-    plt.savefig('outputs/clip_scores_plot.png')
-    print('Plot saved as clip_scores_plot.png')
+    plt.savefig('outputs/clip_scores_derivative_plot.png')
+    print('Plot saved as clip_scores_derivative_plot.png')
 
 if __name__ == "__main__":
     fire.Fire(main)
