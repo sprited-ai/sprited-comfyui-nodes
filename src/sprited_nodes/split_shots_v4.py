@@ -39,7 +39,7 @@ def detect_cuts_visual(
         top_idx = np.argsort(diffs[peaks])[-(k - 1) :]
         peaks = sorted(peaks[top_idx])
 
-    return list(enumerate(diffs, start=1)), peaks.tolist()
+    return list(enumerate(diffs, start=1)), peaks
 
 
 # ---------------------------------------------------------------------
@@ -87,12 +87,16 @@ def visualize_cuts(frames, diffs, cuts, thumb_size=128, bar_max_width=200, out_p
     num_chunks = (frame_count + chunk_size - 1) // chunk_size
     diffs_values = np.array([d for _, d in diffs])
 
+    # Precompute grayscale downscaled frames for diffs
+    downscale = thumb_size
+    grays = [np.array(img.convert("L").resize((downscale, downscale)), dtype=np.float32) for img in frames]
+
     for chunk_idx in range(num_chunks):
         start = chunk_idx * chunk_size
         end = min((chunk_idx + 1) * chunk_size, frame_count)
         chunk_frames = frames[start:end]
         chunk_diffs = diffs[start:end]
-        width = thumb_size + bar_max_width + 60
+        width = thumb_size * 2 + bar_max_width + 70  # extra space for diff image
         height = len(chunk_frames) * thumb_size
         img = Image.new("RGB", (width, height), (30, 30, 30))
         draw = ImageDraw.Draw(img)
@@ -103,16 +107,27 @@ def visualize_cuts(frames, diffs, cuts, thumb_size=128, bar_max_width=200, out_p
             thumb = frames[idx - 1].resize((thumb_size, thumb_size))
             img.paste(thumb, (0, y))
 
+            # Draw visual diff (grayscale, white=change, black=no change)
+            if idx > 1:
+                diff_img = np.abs(grays[idx - 1] - grays[idx - 2])
+                diff_img = (diff_img - diff_img.min()) / (diff_img.max() - diff_img.min() + 1e-8)
+                diff_img = (diff_img * 255).astype(np.uint8)
+                diff_pil = Image.fromarray(diff_img, mode="L").convert("RGB")
+            else:
+                diff_pil = Image.new("RGB", (thumb_size, thumb_size), (0, 0, 0))
+            img.paste(diff_pil, (thumb_size + 5, y - thumb_size))
+
             # Draw score bar
+            bar_x = thumb_size * 2 + 10
             bar_len = int(diff * bar_max_width)
             color = (255, 80, 80) if idx in cuts else (80, 200, 255)
             draw.rectangle(
-                [thumb_size + 10, y + 10, thumb_size + 10 + bar_len, y + thumb_size - 10],
+                [bar_x, y + 10, bar_x + bar_len, y + thumb_size - 10],
                 fill=color,
             )
 
             # Draw frame index text
-            draw.text((thumb_size + bar_max_width + 15, y + thumb_size // 3),
+            draw.text((thumb_size * 2 + bar_max_width + 15, y + thumb_size // 3),
                       f"{idx:03d} ({diff:.2f})",
                       fill=(255, 255, 255))
 
