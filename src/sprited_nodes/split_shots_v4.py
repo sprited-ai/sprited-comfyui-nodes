@@ -12,7 +12,6 @@ def detect_cuts_visual(
     images,
     k=3,
     downscale=64,
-    smooth_window=5,
     prominence_ratio=0.25,
 ):
     """Detect k-1 scene cuts using downscaled grayscale frame differences."""
@@ -27,10 +26,6 @@ def detect_cuts_visual(
     diffs = np.array(
         [np.mean(np.abs(grays[i - 1] - grays[i])) for i in range(0, len(grays) - 1)]
     )
-
-    if smooth_window > 1:
-        kernel = np.ones(smooth_window) / smooth_window
-        diffs = np.convolve(diffs, kernel, mode="same")
 
     diffs = (diffs - diffs.min()) / (diffs.max() - diffs.min() + 1e-8)
 
@@ -57,13 +52,14 @@ def load_animation_frames(path):
 def save_segments(frames, durations, cuts, out_prefix):
     segments = []
     indices = [0] + cuts + [len(frames)]
-    os.makedirs(os.path.dirname(out_prefix) or ".", exist_ok=True)
+    outputs_dir = os.path.join("outputs")
+    os.makedirs(outputs_dir, exist_ok=True)
 
     for i in range(len(indices) - 1):
         start, end = indices[i], indices[i + 1]
         seg_frames = frames[start:end]
         seg_durations = durations[start:end]
-        out_path = f"{out_prefix}_part{i:02d}.webp"
+        out_path = os.path.join(outputs_dir, f"{os.path.basename(out_prefix)}_part{i:02d}.webp")
         seg_frames[0].save(
             out_path,
             format="WEBP",
@@ -91,6 +87,8 @@ def visualize_cuts(frames, diffs, cuts, thumb_size=128, bar_max_width=200, out_p
     downscale = thumb_size
     grays = [np.array(img.convert("L").resize((downscale, downscale)), dtype=np.float32) for img in frames]
 
+    outputs_dir = os.path.join("outputs")
+    os.makedirs(outputs_dir, exist_ok=True)
     for chunk_idx in range(num_chunks):
         start = chunk_idx * chunk_size
         end = min((chunk_idx + 1) * chunk_size, frame_count)
@@ -132,10 +130,10 @@ def visualize_cuts(frames, diffs, cuts, thumb_size=128, bar_max_width=200, out_p
                       fill=(255, 255, 255))
 
         if num_chunks == 1:
-            out_file = out_path
+            out_file = os.path.join(outputs_dir, os.path.basename(out_path))
         else:
-            base, ext = os.path.splitext(out_path)
-            out_file = f"{base}_part{chunk_idx:02d}{ext}"
+            base, ext = os.path.splitext(os.path.basename(out_path))
+            out_file = os.path.join(outputs_dir, f"{base}_part{chunk_idx:02d}{ext}")
         img.save(out_file)
         print(f"Saved visualization to {out_file} (size: {img.width}x{img.height})")
 
@@ -147,13 +145,12 @@ def main(
     path,
     k=3,
     downscale=64,
-    smooth_window=5,
     prominence_ratio=0.25,
     out_prefix=None,
     visualize=True,
 ):
     """Split an animated .webp into k segments, preserving frame rate and generating a vertical diagnostic PNG."""
-    out_prefix = out_prefix or os.path.splitext(path)[0]
+    out_prefix = out_prefix or os.path.splitext(os.path.basename(path))[0]
     print(f"Loading frames from {path}...")
     frames, durations = load_animation_frames(path)
     print(f"Loaded {len(frames)} frames.\n")
@@ -162,7 +159,6 @@ def main(
         frames,
         k=k,
         downscale=downscale,
-        smooth_window=smooth_window,
         prominence_ratio=prominence_ratio,
     )
 
