@@ -13,7 +13,8 @@ numpy>=1.20.0
 scipy
 fire
 matplotlib
-
+transformers
+torch
 
 # Additional video processing tools (optional but recommended)
 # ffmpeg-python>=0.2.0  # Python wrapper for FFmpeg (optional)
