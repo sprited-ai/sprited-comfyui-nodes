@@ -13,6 +13,7 @@ from .preview_video import PreviewVideo
 from .split_shot_by_cut_score import ShotSplitByCutScore
 from .pixel_stats import PixelRGBStats
 from .even_shot_splitter import VideoEvenShotSplitter
+from .loop_momentum_node import LoopMomentumNode
 
 
 # A dictionary that contains all nodes you want to export with their names
@@ -26,6 +27,7 @@ NODE_CLASS_MAPPINGS = {
     "VideoEvenShotSplitter": VideoEvenShotSplitter,
     "ShotSplitByCutScore": ShotSplitByCutScore,
     "LoopTrimNode": LoopTrimNode,
+    "LoopMomentumNode": LoopMomentumNode,
     "SliceBatch": SliceBatch,
     "SliceLatents": SliceLatents,
     "URLToVideo": URLToVideo,
@@ -43,6 +45,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "VideoEvenShotSplitter": "Video Even Shot Splitter 🌱",
     "ShotSplitByCutScore": "Shot Split By Cut Score 🌱",
     "LoopTrimNode": "Loop Trim Node 🌱",
+    "LoopMomentumNode": "Loop Momentum Node 🌱",
     "SliceBatch": "Image From Batch (Slice) 🌱",
     "SliceLatents": "Latent From Batch (Slice) 🌱",
     "URLToVideo": "URL to Video 🌱",
