@@ -1,5 +1,7 @@
 from inspect import cleandoc
 
+from sprited_nodes.even_shot_splitter import VideoEvenShotSplitter
+
 # Import the video downloader
 from .download_video import VideoDownloader
 from .split_shots import VideoShotSplitter
@@ -21,6 +23,7 @@ NODE_CLASS_MAPPINGS = {
     "VideoShotSplitterV0": VideoShotSplitterV0,
     "VideoShotSplitterV2": VideoShotSplitterV2,
     "VideoShotSplitterV3": VideoShotSplitterV3,
+    "VideoEvenShotSplitter": VideoEvenShotSplitter,
     "ShotSplitByCutScore": ShotSplitByCutScore,
     "LoopTrimNode": LoopTrimNode,
     "SliceBatch": SliceBatch,
@@ -37,6 +40,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "VideoShotSplitterV0": "Video Shot Splitter V0 (Simple) 🌱",
     "VideoShotSplitterV2": "Video Shot Splitter V2 🌱",
     "VideoShotSplitterV3": "Video Shot Splitter V3 (K-Shots) 🌱",
+    "VideoEvenShotSplitter": "Video Even Shot Splitter 🌱",
     "ShotSplitByCutScore": "Shot Split By Cut Score 🌱",
     "LoopTrimNode": "Loop Trim Node 🌱",
     "SliceBatch": "Image From Batch (Slice) 🌱",
