@@ -1,7 +1,5 @@
 from inspect import cleandoc
 
-from sprited_nodes.even_shot_splitter import VideoEvenShotSplitter
-
 # Import the video downloader
 from .download_video import VideoDownloader
 from .split_shots import VideoShotSplitter
@@ -14,6 +12,8 @@ from .url_to_video import URLToVideo
 from .preview_video import PreviewVideo
 from .split_shot_by_cut_score import ShotSplitByCutScore
 from .pixel_stats import PixelRGBStats
+from .even_shot_splitter import VideoEvenShotSplitter
+
 
 # A dictionary that contains all nodes you want to export with their names
 # NOTE: names should be globally unique
