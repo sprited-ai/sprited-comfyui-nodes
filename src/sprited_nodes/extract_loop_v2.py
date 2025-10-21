@@ -36,23 +36,25 @@ class LoopExtractorNodeV2:
         def extract_frames(path):
             frames = []
             ext = str(path).lower()
-            if ext.endswith(".webp"):
-                with Image.open(path) as im:
-                    try:
-                        while True:
-                            frame = im.convert('RGB')
-                            frames.append(np.array(frame)[:, :, ::-1])  # RGB to BGR
-                            im.seek(im.tell() + 1)
-                    except EOFError:
-                        pass
+            if ext.endswith('.webp'):
+                from PIL import Image
+                img = Image.open(path)
+                try:
+                    while True:
+                        frames.append(np.array(img.copy()))
+                        img.seek(img.tell() + 1)
+                except EOFError:
+                    pass
             else:
-                cap = cv2.VideoCapture(str(path))
-                while True:
-                    ret, frame = cap.read()
-                    if not ret:
-                        break
-                    frames.append(frame)
-                cap.release()
+                import imageio.v3 as iio
+                try:
+                    meta = iio.immeta(path, plugin="FFMPEG")
+                    frames_np = iio.imread(path, plugin="FFMPEG")
+                except Exception:
+                    frames_np = iio.imread(path)
+                if frames_np.ndim == 3:
+                    frames_np = frames_np[None, ...]
+                frames = [np.array(f) for f in frames_np]
             return frames
 
         def sigmoid(x):
