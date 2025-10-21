@@ -35,15 +35,17 @@ class LoopExtractorNodeV2:
         # Helper: extract frames from webp/mp4
         def extract_frames(path):
             import imageio.v3 as iio
+            fps = 12.0
             try:
                 meta = iio.immeta(path, plugin="FFMPEG")
                 frames_np = iio.imread(path, plugin="FFMPEG")
+                fps = meta.get("fps", fps)
             except Exception:
                 frames_np = iio.imread(path)
             if frames_np.ndim == 3:
                 frames_np = frames_np[None, ...]
             frames = [np.array(f) for f in frames_np]
-            return frames
+            return frames, fps
 
         def sigmoid(x):
             return 1 / (1 + np.exp(-x))
@@ -101,7 +103,7 @@ class LoopExtractorNodeV2:
         src_path = video if isinstance(video, str) else getattr(video, "_VideoFromFile__file", None)
         if not src_path or not os.path.exists(src_path):
             raise RuntimeError("Unable to resolve video file path.")
-        frames = extract_frames(src_path)
+        frames, fps = extract_frames(src_path)
         if len(frames) < max_len:
             raise RuntimeError(f"Not enough frames ({len(frames)}) for loop extraction.")
         best = detect_loops(frames, min_len, max_len, top_k=1)[0]
@@ -114,7 +116,7 @@ class LoopExtractorNodeV2:
         out_name = f"loop_{timestamp}.mp4"
         out_path = out_dir / out_name
         arr = [np.array(f) for f in loop_frames]
-        iio.imwrite(out_path, arr, fps=12.0,
+        iio.imwrite(out_path, arr, fps=fps,
                     codec="libx264", quality=8, pixelformat="yuv420p")
         return (VideoFromFile(str(out_path)),)
 """
