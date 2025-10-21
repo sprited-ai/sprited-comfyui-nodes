@@ -34,27 +34,15 @@ class LoopExtractorNodeV2:
         from pathlib import Path
         # Helper: extract frames from webp/mp4
         def extract_frames(path):
-            frames = []
-            ext = str(path).lower()
-            if ext.endswith('.webp'):
-                from PIL import Image
-                img = Image.open(path)
-                try:
-                    while True:
-                        frames.append(np.array(img.copy()))
-                        img.seek(img.tell() + 1)
-                except EOFError:
-                    pass
-            else:
-                import imageio.v3 as iio
-                try:
-                    meta = iio.immeta(path, plugin="FFMPEG")
-                    frames_np = iio.imread(path, plugin="FFMPEG")
-                except Exception:
-                    frames_np = iio.imread(path)
-                if frames_np.ndim == 3:
-                    frames_np = frames_np[None, ...]
-                frames = [np.array(f) for f in frames_np]
+            import imageio.v3 as iio
+            try:
+                meta = iio.immeta(path, plugin="FFMPEG")
+                frames_np = iio.imread(path, plugin="FFMPEG")
+            except Exception:
+                frames_np = iio.imread(path)
+            if frames_np.ndim == 3:
+                frames_np = frames_np[None, ...]
+            frames = [np.array(f) for f in frames_np]
             return frames
 
         def sigmoid(x):
@@ -119,20 +107,15 @@ class LoopExtractorNodeV2:
         best = detect_loops(frames, min_len, max_len, top_k=1)[0]
         score, i, j, cos_sim, length_penalty = best
         loop_frames = frames[i:j]
-        # Save as animated webp
+        # Save as mp4 using imageio.v3
+        import imageio.v3 as iio
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         out_dir = Path(tempfile.mkdtemp(prefix="loopextract_"))
-        out_name = f"loop_{timestamp}.webp"
+        out_name = f"loop_{timestamp}.mp4"
         out_path = out_dir / out_name
-        pil_frames = [Image.fromarray(cv2.cvtColor(f, cv2.COLOR_BGR2RGB)) for f in loop_frames]
-        pil_frames[0].save(
-            out_path,
-            save_all=True,
-            append_images=pil_frames[1:],
-            duration=40,
-            loop=0,
-            lossless=True
-        )
+        arr = [np.array(f) for f in loop_frames]
+        iio.imwrite(out_path, arr, fps=12.0,
+                    codec="libx264", quality=8, pixelformat="yuv420p")
         return (VideoFromFile(str(out_path)),)
 """
 Inspiration:
