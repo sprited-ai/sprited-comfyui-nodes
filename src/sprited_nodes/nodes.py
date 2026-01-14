@@ -2,18 +2,10 @@ from inspect import cleandoc
 
 # Import the video downloader
 from .download_video import VideoDownloader
-from .split_shots import VideoShotSplitter
-from .split_shots_v0 import VideoShotSplitterV0
-from .split_shots_v2 import VideoShotSplitterV2
-from .split_shots_v3 import VideoShotSplitterV3
-from .extract_loop import LoopTrimNode
 from .slice import SliceBatch, SliceLatents
 from .url_to_video import URLToVideo
-from .preview_video import PreviewVideo
-from .split_shot_by_cut_score import ShotSplitByCutScore
 from .pixel_stats import PixelRGBStats
 from .even_shot_splitter import VideoEvenShotSplitter
-from .loop_momentum_node import LoopMomentumNode
 from .extract_loop_v2 import LoopExtractorNodeV2
 from .anti_corruption import SpriteDXAntiCorruptionV1
 
@@ -22,19 +14,11 @@ from .anti_corruption import SpriteDXAntiCorruptionV1
 # NOTE: names should be globally unique
 NODE_CLASS_MAPPINGS = {
     "VideoDownloader": VideoDownloader,
-    "VideoShotSplitter": VideoShotSplitter,
-    "VideoShotSplitterV0": VideoShotSplitterV0,
-    "VideoShotSplitterV2": VideoShotSplitterV2,
-    "VideoShotSplitterV3": VideoShotSplitterV3,
     "VideoEvenShotSplitter": VideoEvenShotSplitter,
-    "ShotSplitByCutScore": ShotSplitByCutScore,
-    "LoopTrimNode": LoopTrimNode,
-    "LoopMomentumNode": LoopMomentumNode,
     "LoopExtractorNodeV2": LoopExtractorNodeV2,
     "SliceBatch": SliceBatch,
     "SliceLatents": SliceLatents,
     "URLToVideo": URLToVideo,
-    "PreviewVideo": PreviewVideo,
     "PixelRGBStats": PixelRGBStats,
     "SpriteDXAntiCorruptionV1": SpriteDXAntiCorruptionV1
 }
@@ -42,19 +26,11 @@ NODE_CLASS_MAPPINGS = {
 # A dictionary that contains the friendly/humanly readable titles for the nodes
 NODE_DISPLAY_NAME_MAPPINGS = {
     "VideoDownloader": "Video Downloader 🌱",
-    "VideoShotSplitter": "Video Shot Splitter 🌱",
-    "VideoShotSplitterV0": "Video Shot Splitter V0 (Simple) 🌱",
-    "VideoShotSplitterV2": "Video Shot Splitter V2 🌱",
-    "VideoShotSplitterV3": "Video Shot Splitter V3 (K-Shots) 🌱",
     "VideoEvenShotSplitter": "Video Even Shot Splitter 🌱",
-    "ShotSplitByCutScore": "Shot Split By Cut Score 🌱",
-    "LoopTrimNode": "Loop Trim Node 🌱",
-    "LoopMomentumNode": "Loop Momentum Node 🌱",
     "LoopExtractorNodeV2": "Loop Extractor Node V2 🌱",
     "SliceBatch": "Image From Batch (Slice) 🌱",
     "SliceLatents": "Latent From Batch (Slice) 🌱",
     "URLToVideo": "URL to Video 🌱",
-    "PreviewVideo": "Preview Video 🌱",
     "PixelRGBStats": "Pixel Stats (SpriteDX) 🌱",
     "SpriteDXAntiCorruptionV1": "SpriteDX Anti-Corruption V1 🌱"
 }
