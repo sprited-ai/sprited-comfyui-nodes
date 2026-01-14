@@ -12,6 +12,7 @@ opencv-python>=4.5.0
 # Loop extraction dependencies
 imagehash>=4.2.0
 imageio>=2.25.0
+imageio-ffmpeg>=0.4.9  # Bundles FFmpeg binary - no system install needed
 Pillow>=8.0.0
 numpy
 scipy
@@ -20,16 +21,5 @@ matplotlib
 transformers
 torch
 
-# Additional video processing tools (optional but recommended)
-# ffmpeg-python>=0.2.0  # Python wrapper for FFmpeg (optional)
-
-# Note: This package also requires FFmpeg to be installed on the system
-# FFmpeg installation instructions:
-# - Ubuntu/Debian: sudo apt install ffmpeg
-# - macOS: brew install ffmpeg
-# - Windows: Download from https://ffmpeg.org/download.html
-#
-# For WebP support, you may also need:
-# - Ubuntu/Debian: sudo apt install webp
-# - macOS: brew install webp
-# - Windows: Download webp tools from Google
+# Note: imageio-ffmpeg includes a bundled FFmpeg binary, so no system
+# installation of FFmpeg is required. This makes setup much easier!

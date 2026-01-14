@@ -6,11 +6,12 @@ Returns a list of VIDEO objects, ready for further processing.
 """
 
 from __future__ import annotations
-import os, shutil, subprocess, tempfile
+import os, tempfile
 from pathlib import Path
 from typing import List
 from inspect import cleandoc
 from datetime import datetime
+import numpy as np
 
 from comfy_api.input.video_types import VideoInput
 from comfy_api.input_impl import VideoFromFile
@@ -21,24 +22,11 @@ try:
 except ImportError:
     CV2_AVAILABLE = False
 
-def encode_cmd(fmt: str, src: Path, start_ts: str, n_frames: int | None,
-               dst: Path, *, reencode: bool, overwrite: bool = True) -> List[str]:
-    base_args = ["-hide_banner", "-loglevel", "error"]
-    if overwrite:
-        base_args.append("-y")
-    cmd = ["ffmpeg"] + base_args + ["-ss", start_ts, "-i", str(src)]
-    if n_frames is not None and n_frames > 0:
-        cmd += ["-frames:v", str(n_frames)]
-    if fmt == "mp4" and not reencode:
-        cmd += ["-c", "copy"]
-    else:
-        if fmt == "mp4":
-            cmd += ["-c:v", "libx264", "-crf", "0", "-preset", "veryslow", "-pix_fmt", "yuv444p"]
-        elif fmt == "webp":
-            cmd += ["-an", "-vcodec", "libwebp", "-lossless", "1", "-preset", "default", "-loop", "0", "-vsync", "0"]
-        else:
-            raise ValueError(fmt)
-    return cmd + [str(dst)]
+try:
+    import imageio.v3 as iio
+    IMAGEIO_AVAILABLE = True
+except ImportError:
+    IMAGEIO_AVAILABLE = False
 
 class VideoEvenShotSplitter:
     def __init__(self):
@@ -80,15 +68,22 @@ class VideoEvenShotSplitter:
 
         if not CV2_AVAILABLE:
             raise RuntimeError("OpenCV is required for even splitting.")
+        if not IMAGEIO_AVAILABLE:
+            raise RuntimeError("imageio is required for video encoding.")
+            
         src_path = self._extract_video_path(video)
         if not src_path:
             raise RuntimeError("Unable to resolve video file path.")
         src_path = Path(src_path)
         out_dir = Path(output_dir) if output_dir else src_path.parent / f"{src_path.stem}_even_shots"
         out_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Get video metadata
         cap = cv2.VideoCapture(str(src_path))
         fps = cap.get(cv2.CAP_PROP_FPS) or 30
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap.release()
+        
         logger.info(f"Splitting {total} frames into {num_shots} shots (fps={fps})")
         if num_shots < 1:
             num_shots = 1
@@ -97,20 +92,34 @@ class VideoEvenShotSplitter:
         frames_per_shot = total // num_shots
         leftover = total % num_shots
         logger.info(f"frames_per_shot={frames_per_shot}, leftover={leftover}")
+        
+        # Read all frames from source video using imageio
+        logger.info(f"Reading video frames from {src_path}")
+        try:
+            frames = iio.imread(str(src_path), plugin="FFMPEG")
+        except Exception as e:
+            logger.warning(f"Failed to read with FFMPEG plugin: {e}, trying default")
+            frames = iio.imread(str(src_path))
+        
+        if frames.ndim == 3:  # Single frame
+            frames = frames[None, ...]
+        
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") if unique_filenames else ""
         shot_videos = []
         start_frame = 0
+        
         for idx in range(num_shots):
             n_frames = frames_per_shot + (1 if idx < leftover else 0)
             logger.info(f"Chunk {idx}: start_frame={start_frame}, n_frames={n_frames}")
             assert n_frames > 0, f"Chunk {idx} has non-positive n_frames: {n_frames}"
             assert start_frame < total, f"Chunk {idx} start_frame {start_frame} >= total {total}"
-            start_sec = start_frame / fps
+            
             if unique_filenames:
                 filename = f"even-shot-{timestamp}-{idx:03}.{output_format}"
             else:
                 filename = f"even-shot-{idx:03}.{output_format}"
             dst = out_dir / filename
+            
             if dst.exists() and not overwrite:
                 if dst.stat().st_size > 0:
                     logger.info(f"Chunk {idx}: using existing file {dst}")
@@ -119,15 +128,29 @@ class VideoEvenShotSplitter:
                     logger.warning(f"Chunk {idx}: existing file {dst} is empty!")
                 start_frame += n_frames
                 continue
-            logger.info(f"Chunk {idx}: ffmpeg -ss {start_sec:.3f} -frames:v {n_frames} ... -> {dst}")
-            subprocess.check_call(
-                encode_cmd(output_format, src_path, f"{start_sec:.3f}", n_frames,
-                           dst, reencode=reencode, overwrite=overwrite)
-            )
+            
+            # Extract frames for this shot
+            end_frame = start_frame + n_frames
+            shot_frames = frames[start_frame:end_frame]
+            
+            logger.info(f"Chunk {idx}: writing {n_frames} frames to {dst}")
+            
+            # Write using imageio
+            if output_format == "webp":
+                iio.imwrite(str(dst), shot_frames, fps=fps, 
+                           plugin="FFMPEG", codec="libwebp", 
+                           output_params=["-lossless", "1", "-loop", "0"])
+            elif output_format == "mp4":
+                iio.imwrite(str(dst), shot_frames, fps=fps,
+                           plugin="FFMPEG", codec="libx264",
+                           output_params=["-crf", "0", "-preset", "veryslow", "-pix_fmt", "yuv444p"])
+            else:
+                raise ValueError(f"Unsupported format: {output_format}")
+            
             assert dst.exists() and dst.stat().st_size > 0, f"Chunk {idx}: Output file {dst} was not created or is empty!"
             shot_videos.append(VideoFromFile(str(dst)))
             start_frame += n_frames
-        cap.release()
+        
         logger.info(f"Total output chunks: {len(shot_videos)}")
         assert len(shot_videos) == num_shots, f"Expected {num_shots} output videos, got {len(shot_videos)}"
         for p in self._temp_sources:

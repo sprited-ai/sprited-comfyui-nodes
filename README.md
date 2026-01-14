@@ -15,21 +15,17 @@ A collection of custom nodes for ComfyUI
 
 ## Requirements
 
-### System Dependencies
-- **FFmpeg**: Required for video processing
-  - Ubuntu/Debian: `sudo apt install ffmpeg`
-  - macOS: `brew install ffmpeg`
-  - Windows: Download from [https://ffmpeg.org/download.html](https://ffmpeg.org/download.html)
-
 ### Python Dependencies (installed automatically)
-- `requests>=2.25.0`
-- `scenedetect>=0.6.0`
-- `opencv-python>=4.5.0`
+All dependencies are installed via pip - no system packages required!
 
-### Optional
-- **WebP tools**: For WebP video support
-  - Ubuntu/Debian: `sudo apt install webp`
-  - macOS: `brew install webp`
+- `requests>=2.25.0` - HTTP requests
+- `opencv-python>=4.5.0` - Video processing
+- `imageio>=2.25.0` - Video I/O
+- `imageio-ffmpeg>=0.4.9` - **Bundles FFmpeg** (no system install needed!)
+- `huggingface_hub>=0.20.0` - Model downloads
+- `safetensors>=0.4.0` - Model loading
+
+> **Note:** `imageio-ffmpeg` includes a pre-compiled FFmpeg binary, so you don't need to install FFmpeg on your system. This makes setup much easier across all platforms!
 
 # Features
 
@@ -52,13 +48,13 @@ The `-e` flag above will result in a "live" install, in the sense that any chang
 
 Install Github Desktop or follow these [instructions](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent) for ssh.
 
-1. Create a Github repository that matches the directory name. 
+1. Create a Github repository that matches the directory name.
 2. Push the files to Git
 ```
 git add .
 git commit -m "project scaffolding"
 git push
-``` 
+```
 
 ## Writing custom nodes
 
@@ -157,7 +153,7 @@ If you wish to share this custom node with others in the community, you can publ
 
 You need to make an account on https://registry.comfy.org and create an API key token.
 
-- [ ] Go to the [registry](https://registry.comfy.org). Login and create a publisher id (everything after the `@` sign on your registry profile). 
+- [ ] Go to the [registry](https://registry.comfy.org). Login and create a publisher id (everything after the `@` sign on your registry profile).
 - [ ] Add the publisher id into the pyproject.toml file.
 - [ ] Create an api key on the Registry for publishing from Github. [Instructions](https://docs.comfy.org/registry/publishing#create-an-api-key-for-publishing).
 - [ ] Add it to your Github Repository Secrets as `REGISTRY_ACCESS_TOKEN`.
