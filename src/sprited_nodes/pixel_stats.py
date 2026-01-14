@@ -29,18 +29,30 @@ def mask_tensor_to_weight_list(mask_tensor, like_images):
     return weights
 
 def weighted_global_mean_std(rgb_list, weight_list):
-    """Compute global weighted mean/std across all frames and all color channels."""
+    """Compute global weighted mean/std across all frames using grayscale luminance."""
     all_pixels = []
     all_weights = []
 
     for rgb, weight in zip(rgb_list, weight_list):
         h, w, c = rgb.shape
-        # Flatten spatial dimensions and stack all channels
-        pixels = rgb.reshape(-1)  # Shape: (h*w*c,)
-        weights = np.broadcast_to(weight[..., None], (h, w, c)).reshape(-1)  # Shape: (h*w*c,)
+        # Convert RGB to grayscale using ITU-R BT.601 formula
+        gray = 0.299 * rgb[:, :, 0] + 0.587 * rgb[:, :, 1] + 0.114 * rgb[:, :, 2]  # Shape: (h, w)
 
-        all_pixels.append(pixels)
-        all_weights.append(weights)
+        # Flatten spatial dimensions
+        pixels = gray.reshape(-1)  # Shape: (h*w,)
+        weights = weight.reshape(-1)  # Shape: (h*w,)
+
+        # Filter out masked pixels (weight < threshold)
+        mask = weights > 1e-6
+        pixels = pixels[mask]
+        weights = weights[mask]
+
+        if len(pixels) > 0:
+            all_pixels.append(pixels)
+            all_weights.append(weights)
+
+    if len(all_pixels) == 0:
+        return 0.0, 0.0
 
     # Concatenate all frames
     all_pixels = np.concatenate(all_pixels)
@@ -55,15 +67,28 @@ def weighted_global_mean_std(rgb_list, weight_list):
     return float(global_mean), float(global_std)
 
 def weighted_per_frame_mean_std(rgb_list, weight_list):
-    """Compute per-frame weighted mean/std across all color channels for each frame."""
+    """Compute per-frame weighted mean/std using grayscale luminance for each frame."""
     frame_means = []
     frame_stds = []
 
     for rgb, weight in zip(rgb_list, weight_list):
         h, w, c = rgb.shape
-        # Flatten spatial dimensions and stack all channels
-        pixels = rgb.reshape(-1)  # Shape: (h*w*c,)
-        weights = np.broadcast_to(weight[..., None], (h, w, c)).reshape(-1)  # Shape: (h*w*c,)
+        # Convert RGB to grayscale using ITU-R BT.601 formula
+        gray = 0.299 * rgb[:, :, 0] + 0.587 * rgb[:, :, 1] + 0.114 * rgb[:, :, 2]  # Shape: (h, w)
+
+        # Flatten spatial dimensions
+        pixels = gray.reshape(-1)  # Shape: (h*w,)
+        weights = weight.reshape(-1)  # Shape: (h*w,)
+
+        # Filter out masked pixels (weight < threshold)
+        mask = weights > 1e-6
+        pixels = pixels[mask]
+        weights = weights[mask]
+
+        if len(pixels) == 0:
+            frame_means.append(0.0)
+            frame_stds.append(0.0)
+            continue
 
         # Compute weighted statistics for this frame
         total_weight = np.sum(weights) + 1e-8
@@ -78,13 +103,14 @@ def weighted_per_frame_mean_std(rgb_list, weight_list):
 
 class PixelRGBStats:
     """
-    Computes both global and per-frame weighted mean and std across all color channels.
+    Computes both global and per-frame weighted mean and std using grayscale luminance.
+    RGB is converted to grayscale (ITU-R BT.601: Y = 0.299*R + 0.587*G + 0.114*B) before computing statistics.
     The mask values [0–1] act as weights; if omitted, all pixels are weighted equally.
     Returns:
-        global_mean = single number (global mean across all frames and channels)
-        global_std  = single number (global std across all frames and channels)
-        frame_means = list of numbers (mean for each frame across all channels)
-        frame_stds  = list of numbers (std for each frame across all channels)
+        global_mean = single number (global grayscale mean across all frames)
+        global_std  = single number (global grayscale std across all frames)
+        frame_means = list of numbers (grayscale mean for each frame)
+        frame_stds  = list of numbers (grayscale std for each frame)
         max_mean    = single number (maximum frame mean)
         max_std     = single number (maximum frame std)
         min_mean    = single number (minimum frame mean)
