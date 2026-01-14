@@ -11,6 +11,7 @@ from .extract_loop_v3 import LoopExtractorNodeV3
 from .anti_corruption import SpriteDXAntiCorruptionV1
 from .make_grid import MakeGridNode
 from .flatten_nested_list import FlattenImageListNode
+from .parse_int import SpriteDXParseIntNode
 
 
 # A dictionary that contains all nodes you want to export with their names
@@ -26,7 +27,8 @@ NODE_CLASS_MAPPINGS = {
     "PixelRGBStats": PixelRGBStats,
     "SpriteDXAntiCorruptionV1": SpriteDXAntiCorruptionV1,
     "SpritedMakeGrid": MakeGridNode,
-    "FlattenImageList": FlattenImageListNode
+    "FlattenImageList": FlattenImageListNode,
+    "SpriteDX_ParseInt": SpriteDXParseIntNode
 }
 
 # A dictionary that contains the friendly/humanly readable titles for the nodes
@@ -41,5 +43,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "PixelRGBStats": "Pixel Stats (SpriteDX) 🌱",
     "SpriteDXAntiCorruptionV1": "SpriteDX Anti-Corruption V1 🌱",
     "SpritedMakeGrid": "Make Grid 🌱",
-    "FlattenImageList": "Flatten Image List 🌱"
+    "FlattenImageList": "Flatten Image List 🌱",
+    "SpriteDX_ParseInt": "Parse Int (SpriteDX) 🌱"
 }
