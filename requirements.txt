@@ -1,6 +1,10 @@
 # Core dependencies for ComfyUI nodes
 requests>=2.25.0
 
+# Model loading dependencies
+huggingface_hub>=0.20.0
+safetensors>=0.4.0
+
 # Video processing dependencies
 scenedetect>=0.6.0
 opencv-python>=4.5.0
@@ -9,7 +13,7 @@ opencv-python>=4.5.0
 imagehash>=4.2.0
 imageio>=2.25.0
 Pillow>=8.0.0
-numpy>=1.20.0
+numpy
 scipy
 fire
 matplotlib

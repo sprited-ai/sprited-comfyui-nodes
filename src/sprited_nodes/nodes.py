@@ -15,6 +15,7 @@ from .pixel_stats import PixelRGBStats
 from .even_shot_splitter import VideoEvenShotSplitter
 from .loop_momentum_node import LoopMomentumNode
 from .extract_loop_v2 import LoopExtractorNodeV2
+from .anti_corruption import SpriteDXAntiCorruptionV1
 
 
 # A dictionary that contains all nodes you want to export with their names
@@ -34,7 +35,8 @@ NODE_CLASS_MAPPINGS = {
     "SliceLatents": SliceLatents,
     "URLToVideo": URLToVideo,
     "PreviewVideo": PreviewVideo,
-    "PixelRGBStats": PixelRGBStats
+    "PixelRGBStats": PixelRGBStats,
+    "SpriteDXAntiCorruptionV1": SpriteDXAntiCorruptionV1
 }
 
 # A dictionary that contains the friendly/humanly readable titles for the nodes
@@ -53,5 +55,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SliceLatents": "Latent From Batch (Slice) 🌱",
     "URLToVideo": "URL to Video 🌱",
     "PreviewVideo": "Preview Video 🌱",
-    "PixelRGBStats": "Pixel Stats (SpriteDX) 🌱"
+    "PixelRGBStats": "Pixel Stats (SpriteDX) 🌱",
+    "SpriteDXAntiCorruptionV1": "SpriteDX Anti-Corruption V1 🌱"
 }
