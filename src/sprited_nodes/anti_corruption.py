@@ -1,11 +1,10 @@
-"""
-Anti-Corruption Model Node for ComfyUI
+"""Anti-Corruption Model Node for ComfyUI
 
 Restores corrupted sprite animations using a trained U-Net model.
 The model removes upscaling artifacts, blur, noise, and reconstructs clean RGBA sprites.
 
-Model: sprited/sprite-dx-anti-corruption-v1
-Input: 128x128 RGB (corrupted sprite frames)
+Model: sprited/sprite-dx-anti-corruption-v1 (revision: v1.1.1)
+Input: 128x128 RGBA (corrupted sprite frames)
 Output: 128x128 RGBA (clean sprite frames with transparency)
 """
 
@@ -70,8 +69,8 @@ class Up(nn.Module):
 
 class AntiCorruptionUNet(nn.Module):
     """
-    U-Net for anti-corruption: RGB (3 channels) -> RGBA (4 channels)
-    Input: 128x128x3 (corrupted RGB)
+    U-Net for anti-corruption: RGBA (4 channels) -> RGBA (4 channels)
+    Input: 128x128x4 (corrupted RGBA, alpha may be all 1s or corrupted)
     Output: 128x128x4 (clean RGBA)
     """
 
@@ -79,7 +78,7 @@ class AntiCorruptionUNet(nn.Module):
         super().__init__()
 
         # Encoder
-        self.inc = DoubleConv(3, 64)
+        self.inc = DoubleConv(4, 64)
         self.down1 = Down(64, 128)
         self.down2 = Down(128, 256)
         self.down3 = Down(256, 512)
@@ -97,8 +96,17 @@ class AntiCorruptionUNet(nn.Module):
         self.out_rgb = nn.Conv2d(64, 3, 1)
         self.out_alpha = nn.Conv2d(64, 1, 1)
 
+        # Initialize output layers for identity-like behavior
+        # RGB: small weights so residual corrections are small
+        nn.init.normal_(self.out_rgb.weight, mean=0.0, std=0.001)
+        nn.init.zeros_(self.out_rgb.bias)
+
+        # Alpha: keep random initialization
+        nn.init.normal_(self.out_alpha.weight, mean=0.0, std=0.001)
+        nn.init.zeros_(self.out_alpha.bias)
+
     def forward(self, x):
-        input_rgb = x  # Save input for residual connection
+        input_rgba = x  # Save input for residual connection (RGBA)
 
         # Encoder with skip connections
         x1 = self.inc(x)      # 128x128x64
@@ -113,15 +121,15 @@ class AntiCorruptionUNet(nn.Module):
         x = self.up3(x, x2)   # 64x64x64
         x = self.up4(x, x1)   # 128x128x64
 
-        # Separate output heads with residual connection for RGB
+        # Separate output heads with residual connection for RGB only
         rgb_residual = self.out_rgb(x)
-        rgb = input_rgb + rgb_residual  # Residual connection
-        alpha = torch.sigmoid(self.out_alpha(x))
+        rgb = input_rgba[:, :3] + rgb_residual  # Identity + learned corrections for RGB, unbounded
+        alpha = torch.sigmoid(self.out_alpha(x))  # Direct prediction for alpha
 
         return torch.cat([rgb, alpha], dim=1)
 
     def post_process(self, x):
-        """Post-process output to ensure valid RGBA range [0, 1]."""
+        """Post-process output to ensure valid RGBA."""
         rgb = torch.clamp(x[:, :3], 0.0, 1.0)
         alpha = torch.clamp(x[:, 3:4], 0.0, 1.0)
         return torch.cat([rgb, alpha], dim=1)
@@ -149,40 +157,95 @@ class ModelManager:
             self.cache_dir = Path(tempfile.gettempdir()) / "comfyui_sprite_anticorruption"
             self.cache_dir.mkdir(exist_ok=True, parents=True)
 
-    def load_model(self, force_reload=False):
-        """Load model from HuggingFace, using cache if available."""
-        if self._model is not None and not force_reload:
+            # Local models directory (checked first, before HuggingFace)
+            # Path relative to ComfyUI root: custom_nodes/sprited-comfyui-nodes/src/sprited_nodes -> ../../../..
+            comfyui_root = Path(__file__).parent.parent.parent.parent.parent
+            self.local_models_dir = comfyui_root / "models" / "sprite_dx_anti_corruption"
+            self.local_models_dir.mkdir(exist_ok=True, parents=True)
+
+    def load_model(self, force_reload=False, force_download=False):
+        """Load model from local directory or HuggingFace.
+
+        Priority order:
+        1. Check models/sprite_dx_anti_corruption/model.safetensors (local)
+        2. Download from HuggingFace if not found locally
+
+        Args:
+            force_reload: Force reload model into memory (clears cached model)
+            force_download: Force re-download from HuggingFace (skips local check)
+        """
+        if self._model is not None and not force_reload and not force_download:
             return self._model
 
         print(f"[AntiCorruption] Loading model on {self._device}...")
 
-        try:
-            # Check if model is already cached locally
-            model_filename = "model.safetensors"
-            repo_id = "sprited/sprite-dx-anti-corruption-v1"
+        model_filename = "model.safetensors"
+        repo_id = "sprited/sprite-dx-anti-corruption-v1"
+        revision = "v1.1.1"  # Use specific version tag
+        model_path = None
 
-            # Try to find cached model first
-            model_path = hf_hub_download(
-                repo_id=repo_id,
-                filename=model_filename,
-                cache_dir=str(self.cache_dir),
-                local_files_only=True  # Don't download, only check cache
-            )
-            print(f"[AntiCorruption] Using cached model from: {model_path}")
+        # Check local models directory first (unless force_download is enabled)
+        if not force_download:
+            local_model_path = self.local_models_dir / model_filename
+            if local_model_path.exists():
+                print(f"[AntiCorruption] Using local model from: {local_model_path}")
+                model_path = str(local_model_path)
 
-        except Exception:
-            # Model not in cache, download it
-            print(f"[AntiCorruption] Model not found in cache, downloading from HuggingFace...")
-            try:
-                model_path = hf_hub_download(
-                    repo_id=repo_id,
-                    filename=model_filename,
-                    cache_dir=str(self.cache_dir)
-                )
-                print(f"[AntiCorruption] Model downloaded to: {model_path}")
-            except Exception as e:
-                raise RuntimeError(f"Failed to download model from HuggingFace: {str(e)}")
+        # If not found locally, download from HuggingFace
+        if model_path is None:
+            downloaded_path = None
+            if force_download:
+                # Force re-download from HuggingFace, ignore cache
+                print(f"[AntiCorruption] Force download enabled, fetching fresh model from HuggingFace...")
+                try:
+                    downloaded_path = hf_hub_download(
+                        repo_id=repo_id,
+                        filename=model_filename,
+                        revision=revision,
+                        cache_dir=str(self.cache_dir),
+                        force_download=True  # Force fresh download
+                    )
+                    print(f"[AntiCorruption] Model downloaded to cache: {downloaded_path}")
+                except Exception as e:
+                    raise RuntimeError(f"Failed to download model from HuggingFace: {str(e)}")
+            else:
+                try:
+                    # Check if model is already cached by HuggingFace
+                    downloaded_path = hf_hub_download(
+                        repo_id=repo_id,
+                        filename=model_filename,
+                        revision=revision,
+                        cache_dir=str(self.cache_dir),
+                        local_files_only=True  # Don't download, only check cache
+                    )
+                    print(f"[AntiCorruption] Using HuggingFace cached model from: {downloaded_path}")
 
+                except Exception:
+                    # Model not in cache, download it
+                    print(f"[AntiCorruption] Model not found locally or in cache, downloading from HuggingFace...")
+                    try:
+                        downloaded_path = hf_hub_download(
+                            repo_id=repo_id,
+                            filename=model_filename,
+                            revision=revision,
+                            cache_dir=str(self.cache_dir)
+                        )
+                        print(f"[AntiCorruption] Model downloaded to cache: {downloaded_path}")
+                    except Exception as e:
+                        raise RuntimeError(f"Failed to download model from HuggingFace: {str(e)}")
+
+            # Copy downloaded model to local models directory for future use
+            if downloaded_path:
+                import shutil
+                local_model_path = self.local_models_dir / model_filename
+                try:
+                    shutil.copy2(downloaded_path, local_model_path)
+                    print(f"[AntiCorruption] Copied model to local directory: {local_model_path}")
+                    model_path = str(local_model_path)
+                except Exception as e:
+                    print(f"[AntiCorruption] Warning: Failed to copy model to local directory: {e}")
+                    print(f"[AntiCorruption] Using cached version: {downloaded_path}")
+                    model_path = downloaded_path
         try:
             # Create model architecture
             model = AntiCorruptionUNet().to(self._device)
@@ -230,6 +293,7 @@ class SpriteAntiCorruptionNode:
             "optional": {
                 "auto_resize": ("BOOLEAN", {"default": True}),
                 "force_reload_model": ("BOOLEAN", {"default": False}),
+                "force_download_model": ("BOOLEAN", {"default": False}),
             }
         }
 
@@ -239,20 +303,23 @@ class SpriteAntiCorruptionNode:
     CATEGORY = "image/restoration"
     DESCRIPTION = "Restore corrupted sprite animations to clean RGBA using trained U-Net model."
 
-    def restore(self, images, auto_resize=True, force_reload_model=False):
+    def restore(self, images, auto_resize=True, force_reload_model=False, force_download_model=False):
         """
         Restore corrupted sprite frames.
 
         Args:
-            images: ComfyUI IMAGE tensor [B, H, W, C] in range [0, 1], RGB
+            images: ComfyUI IMAGE tensor [B, H, W, C] in range [0, 1], RGB or RGBA
+                    If RGB, will be converted to RGBA with opaque alpha (all 1s)
+                    If RGBA, the model will process both RGB and alpha channels
             auto_resize: Whether to automatically resize to 128x128
-            force_reload_model: Force reload model from disk
+            force_reload_model: Force reload model from memory cache
+            force_download_model: Force re-download model from HuggingFace (ignores local cache)
 
         Returns:
             Tuple of (restored_images,) as RGBA IMAGE tensor [B, 128, 128, 4]
         """
         # Load model
-        model = self.model_manager.load_model(force_reload=force_reload_model)
+        model = self.model_manager.load_model(force_reload=force_reload_model, force_download=force_download_model)
         device = self.model_manager.device
 
         # Convert ComfyUI IMAGE to torch tensor
@@ -262,12 +329,20 @@ class SpriteAntiCorruptionNode:
 
         batch_size, height, width, channels = images.shape
 
-        # Ensure RGB (drop alpha if present)
-        if channels == 4:
-            images = images[:, :, :, :3]
-            print(f"[AntiCorruption] Dropped alpha channel from input (had RGBA, using RGB)")
-        elif channels != 3:
+        # Convert RGB to RGBA if needed (model expects RGBA)
+        if channels == 3:
+            # Add opaque alpha channel (all 1s)
+            alpha_channel = torch.ones((batch_size, height, width, 1), dtype=images.dtype, device=images.device)
+            images = torch.cat([images, alpha_channel], dim=3)
+            print(f"[AntiCorruption] Converted RGB to RGBA (added opaque alpha channel)")
+        elif channels == 4:
+            # Already RGBA, pass through as-is
+            print(f"[AntiCorruption] Input is RGBA, passing through to model")
+        else:
             raise ValueError(f"Expected 3 or 4 channel input, got {channels}")
+
+        # Use RGBA images for processing
+        # (no need to set images = rgb_images since we already have RGBA)
 
         # Check if resize is needed
         needs_resize = (height != 128 or width != 128)
