@@ -16,6 +16,75 @@ import numpy as np
 from pathlib import Path
 from huggingface_hub import hf_hub_download
 import tempfile
+from PIL import Image
+
+# ============================================================================
+# PREPROCESSING HELPERS (from training code)
+# ============================================================================
+
+def resize_and_pad(image_tensor, target_size=128):
+    """
+    Resize image tensor to fit within target_size while maintaining aspect ratio,
+    then pad to make it square.
+
+    Args:
+        image_tensor: Tensor in [B, C, H, W] format (NCHW) or [C, H, W] format
+        target_size: Target size for both dimensions (default: 128)
+
+    Returns:
+        padded_tensor: Tensor of shape [B, C, target_size, target_size] or [C, target_size, target_size]
+        padding_info: Dict with 'padding' (left, top, right, bottom) and 'original_size'
+    """
+    # Handle both batched [B, C, H, W] and single [C, H, W] inputs
+    is_batched = len(image_tensor.shape) == 4
+    if not is_batched:
+        image_tensor = image_tensor.unsqueeze(0)
+
+    batch_size, channels, height, width = image_tensor.shape
+
+    # Calculate aspect ratio preserving size
+    if width > height:
+        new_width = target_size
+        new_height = int(height * (target_size / width))
+    else:
+        new_height = target_size
+        new_width = int(width * (target_size / height))
+
+    # Ensure dimensions are at least 1
+    new_height = max(1, new_height)
+    new_width = max(1, new_width)
+
+    # Resize using bilinear interpolation
+    resized = F.interpolate(
+        image_tensor,
+        size=(new_height, new_width),
+        mode='bilinear',
+        align_corners=False
+    )
+
+    # Calculate padding to make it square
+    pad_height = target_size - new_height
+    pad_width = target_size - new_width
+
+    # Distribute padding evenly (top/bottom, left/right)
+    pad_top = pad_height // 2
+    pad_bottom = pad_height - pad_top
+    pad_left = pad_width // 2
+    pad_right = pad_width - pad_left
+
+    # Apply padding (PyTorch padding order: left, right, top, bottom)
+    padded = F.pad(resized, (pad_left, pad_right, pad_top, pad_bottom), mode='constant', value=0)
+
+    padding_info = {
+        'padding': (pad_left, pad_top, pad_right, pad_bottom),
+        'original_size': (height, width),
+        'resized_size': (new_height, new_width)
+    }
+
+    if not is_batched:
+        padded = padded.squeeze(0)
+
+    return padded, padding_info
 
 # ============================================================================
 # U-NET ARCHITECTURE (from training code)
@@ -344,6 +413,13 @@ class SpriteAntiCorruptionNode:
         # Use RGBA images for processing
         # (no need to set images = rgb_images since we already have RGBA)
 
+        # Debug: Show transparency statistics BEFORE resize/padding
+        alpha_channel_before = images[:, :, :, 3]  # [B, H, W]
+        total_pixels_before = alpha_channel_before.numel()
+        transparent_pixels_before = (alpha_channel_before < 0.1).sum().item()
+        transparent_pct_before = (transparent_pixels_before / total_pixels_before) * 100
+        print(f"[AntiCorruption] BEFORE resize - Transparent pixels: {transparent_pct_before:.2f}% ({transparent_pixels_before}/{total_pixels_before})")
+
         # Check if resize is needed
         needs_resize = (height != 128 or width != 128)
 
@@ -354,18 +430,21 @@ class SpriteAntiCorruptionNode:
             )
 
         if needs_resize:
-            print(f"[AntiCorruption] Resizing from {height}x{width} to 128x128")
-            # Resize using bilinear interpolation
-            # Convert [B, H, W, C] -> [B, C, H, W] for F.interpolate
+            print(f"[AntiCorruption] Resizing from {height}x{width} to 128x128 (maintaining aspect ratio)")
+            # Convert [B, H, W, C] -> [B, C, H, W] for resize_and_pad
             images_nchw = images.permute(0, 3, 1, 2)
-            images_resized = F.interpolate(
-                images_nchw,
-                size=(128, 128),
-                mode='bilinear',
-                align_corners=False
-            )
+            # Use padding-based resizing (same as training script)
+            images_padded, padding_info = resize_and_pad(images_nchw, target_size=128)
             # Convert back to [B, H, W, C]
-            images = images_resized.permute(0, 2, 3, 1)
+            images = images_padded.permute(0, 2, 3, 1)
+            print(f"[AntiCorruption] Applied padding: {padding_info['padding']} (left, top, right, bottom)")
+
+        # Debug: Show transparency statistics after resize/padding
+        alpha_channel = images[:, :, :, 3]  # [B, H, W]
+        total_pixels = alpha_channel.numel()
+        transparent_pixels = (alpha_channel < 0.1).sum().item()
+        transparent_pct = (transparent_pixels / total_pixels) * 100
+        print(f"[AntiCorruption] Transparent pixels: {transparent_pct:.2f}% ({transparent_pixels}/{total_pixels})")
 
         # Process in batches to avoid memory issues
         restored_frames = []
