@@ -20,6 +20,7 @@ fire
 matplotlib
 transformers
 torch
+torchvision  # Required for BiRefNet preprocessing
 
 # Note: imageio-ffmpeg includes a bundled FFmpeg binary, so no system
 # installation of FFmpeg is required. This makes setup much easier!
